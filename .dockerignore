@@ -1,0 +1,20 @@
+# build artifacts
+backend/feedsocial
+backend/*.test
+
+# node / react leftovers (not used by the Go image)
+frontend/
+tests/
+test_reports/
+test_result.md
+
+# vcs & tooling
+.git
+.gitignore
+.emergent
+memory/
+*.md
+!README.md
+
+# local env
+.env

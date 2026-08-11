@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Conflux — social feed reader</title>
+  <meta name="description" content="Conflux — a social RSS/Atom feed reader with comments, reactions, reposts and quotes." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400,0..1,0" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div id="app" data-testid="app-root"></div>
+
+  <!-- popover / dialog / snackbar mount points -->
+  <div id="popover-layer"></div>
+  <div id="dialog-layer"></div>
+  <div id="snackbar" class="snackbar" data-testid="snackbar" role="status" aria-live="polite"></div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/ui.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

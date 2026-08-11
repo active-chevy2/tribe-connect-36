@@ -1,0 +1,51 @@
+# Conflux — Docker Compose (Coolify-compatible)
+#
+# IMPORTANT for Coolify (self-hosted PaaS):
+#   * NO `ports:` mappings — Coolify's built-in reverse proxy binds host ports.
+#     We only `expose:` the internal container port and let Coolify route the
+#     domain/FQDN (set in the Coolify UI) to it.
+#   * NO bind-mounts of repo files/config — everything the app needs is baked
+#     into the image via the Dockerfile (COPY). We only use a *named volume*
+#     for the database's own data directory, which Coolify manages safely.
+
+services:
+  app:
+    build: .
+    expose:
+      - "8080"
+    environment:
+      PORT: "8080"
+      WEB_DIR: /app/web
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_USER: ${DB_USER:-feeduser}
+      DB_PASSWORD: ${DB_PASSWORD:-feedpass}
+      DB_NAME: ${DB_NAME:-feedsocial}
+      JWT_SECRET: ${JWT_SECRET:-please-change-this-to-a-long-random-secret}
+      FEED_WORKER: "on"
+      FEED_REFRESH_MINUTES: "15"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: mariadb:11
+    environment:
+      MARIADB_DATABASE: ${DB_NAME:-feedsocial}
+      MARIADB_USER: ${DB_USER:-feeduser}
+      MARIADB_PASSWORD: ${DB_PASSWORD:-feedpass}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-please-change-this-root-password}
+    expose:
+      - "3306"
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  db_data:
