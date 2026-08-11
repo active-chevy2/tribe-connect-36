@@ -13,15 +13,14 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/feedsoc
 # ---------- runtime stage ----------
 FROM debian:bookworm-slim
 
-# ca-certificates are required so the feed fetcher can pull https:// feeds
+# ca-certificates and tzdata are required; wget is needed for health checks
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates tzdata \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata wget \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Bake the binary AND the frontend/config directly into the image.
-# (Do NOT bind-mount these at runtime — see README for Coolify guidance.)
+# Bake the binary AND the frontend directly into the image.
 COPY --from=build /out/feedsocial /app/feedsocial
 COPY web/ /app/web/
 
