@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS users (
   bio TEXT,
   avatar_url VARCHAR(500),
   is_admin TINYINT(1) NOT NULL DEFAULT 0,
+  profile_link VARCHAR(255) NULL,
+  profile_link_title VARCHAR(100) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -59,9 +61,11 @@ CREATE TABLE IF NOT EXISTS posts (
   body MEDIUMTEXT,
   ref_type ENUM('post','feed_item') NULL,
   ref_id BIGINT NULL,
+  visibility ENUM('public','private') NOT NULL DEFAULT 'public',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_posts_created (created_at),
   INDEX idx_posts_user (user_id),
+  INDEX idx_posts_user_visibility (user_id, visibility, created_at),
   CONSTRAINT fk_post_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -117,4 +121,51 @@ CREATE TABLE IF NOT EXISTS login_attempts (
   locked_until DATETIME NULL,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_identifier (identifier)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- new tables and columns
+CREATE TABLE IF NOT EXISTS settings (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `key` VARCHAR(100) NOT NULL UNIQUE,
+  `value` TEXT,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO settings (`key`, `value`) VALUES
+('allow_registration', '0'),
+('invites_enabled', '0'),
+('smtp_enabled', '0'),
+('smtp_host', ''),
+('smtp_port', '587'),
+('smtp_user', ''),
+('smtp_password', ''),
+('smtp_from', ''),
+('smtp_from_name', ''),
+('smtp_tls', '1'),
+('app_name', 'Conflux'),
+('app_short_name', 'Conflux'),
+('app_theme_color', '#006a6a'),
+('app_icon_url', ''),
+('default_post_visibility', 'public');
+
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  token VARCHAR(64) NOT NULL UNIQUE,
+  expires_at DATETIME NOT NULL,
+  used BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_pwd_reset_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS invites (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  token VARCHAR(64) NOT NULL UNIQUE,
+  creator_id BIGINT NOT NULL,
+  used BOOLEAN NOT NULL DEFAULT FALSE,
+  used_by_user_id BIGINT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at DATETIME NULL,
+  CONSTRAINT fk_invite_creator FOREIGN KEY (creator_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_token (token)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
