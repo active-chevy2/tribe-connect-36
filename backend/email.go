@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"net/smtp"
 	"strconv"
 	"strings"
@@ -23,7 +24,7 @@ func (s *Server) getSMTPConfig() (enabled bool, host, port, user, password, from
 	fromName, _ = s.getSetting("smtp_from_name")
 	tlsStr, _ := s.getSetting("smtp_tls")
 	tls = tlsStr != "0"
-	// fallback port
+	_ = tls // avoid unused variable warning (TLS is currently not implemented)
 	if portStr == "" {
 		portStr = "587"
 	}
@@ -74,7 +75,6 @@ func (s *Server) sendWelcomeEmail(user *User) {
 }
 
 func (s *Server) sendPasswordResetEmail(email, token string) {
-	// Build reset link
 	resetLink := s.cfg.PublicBaseURL + "/#/reset-password?token=" + token
 	subject := "Reset your Conflux password"
 	body := fmt.Sprintf(`<h1>Reset your password</h1><p>Click the link below to set a new password. This link expires in 1 hour.</p><p><a href="%s">%s</a></p>`, resetLink, resetLink)
