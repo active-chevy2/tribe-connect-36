@@ -13,9 +13,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/feedsoc
 # ---------- runtime stage ----------
 FROM debian:bookworm-slim
 
-# ca-certificates and tzdata are required; wget is needed for health checks
+# ca-certificates, tzdata, wget, and curl are required for health checks
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates tzdata wget \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata wget curl \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
