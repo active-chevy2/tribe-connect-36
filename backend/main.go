@@ -41,6 +41,9 @@ func (s *Server) routes() http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(cors)
 
+	// Manifest.json endpoint (PWA)
+	r.Get("/manifest.json", s.handleManifest)
+
 	r.Route("/api", func(api chi.Router) {
 		api.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -50,6 +53,8 @@ func (s *Server) routes() http.Handler {
 		api.Get("/auth/bootstrap", s.handleBootstrap)
 		api.Post("/auth/register", s.handleRegister)
 		api.Post("/auth/login", s.handleLogin)
+		api.Post("/auth/forgot", s.handleForgotPassword)
+		api.Post("/auth/reset", s.handleResetPassword)
 
 		// public reads (optional auth for personalization)
 		api.Group(func(pub chi.Router) {
@@ -64,6 +69,7 @@ func (s *Server) routes() http.Handler {
 			pub.Get("/users", s.handleListUsers)
 			pub.Get("/users/{username}", s.handleGetProfile)
 			pub.Get("/users/{username}/posts", s.handleUserPosts)
+			pub.Get("/users/{username}/feed", s.handleUserFeed) // RSS
 		})
 
 		// authenticated writes
@@ -94,6 +100,16 @@ func (s *Server) routes() http.Handler {
 
 			pr.Post("/users/{id}/follow", s.handleFollow)
 			pr.Delete("/users/{id}/follow", s.handleUnfollow)
+
+			// Invites
+			pr.Get("/invites", s.handleListInvites)
+			pr.Post("/invites", s.handleCreateInvite)
+			pr.Delete("/invites/{id}", s.handleRevokeInvite)
+
+			// Admin endpoints
+			pr.Get("/settings", s.handleGetSettings)   // only admin
+			pr.Put("/settings", s.handleUpdateSettings) // only admin
+			pr.Put("/admin/posts/{id}", s.handleAdminUpdatePost) // admin override visibility
 		})
 	})
 
