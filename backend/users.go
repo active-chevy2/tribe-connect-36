@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/xml"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -49,7 +50,6 @@ func (s *Server) handleUserPosts(w http.ResponseWriter, r *http.Request) {
 		page = 1
 	}
 	limit := 20
-	// Only show public posts + private if viewer is the user or admin
 	query := "SELECT id FROM posts WHERE user_id=? AND (visibility='public'"
 	args := []interface{}{uid}
 	if viewer != 0 && (viewer == uid || (currentUser(r) != nil && currentUser(r).IsAdmin)) {
@@ -171,10 +171,10 @@ func (s *Server) handleUserFeed(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type item struct {
-		Title string `xml:"title"`
-		Link  string `xml:"link"`
-		Guid  string `xml:"guid"`
-		PubDate string `xml:"pubDate"`
+		Title       string `xml:"title"`
+		Link        string `xml:"link"`
+		Guid        string `xml:"guid"`
+		PubDate     string `xml:"pubDate"`
 		Description string `xml:"description"`
 	}
 	items := []item{}
