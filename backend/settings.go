@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"net/http"
-	"strconv"
 )
 
 func (s *Server) getSetting(key string) (string, error) {
@@ -54,7 +53,6 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	// Validate allowed keys
 	allowed := map[string]bool{
 		"allow_registration": true,
 		"invites_enabled":    true,
