@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
 	"io"
@@ -49,18 +50,15 @@ func extractImage(item *gofeed.Item) string {
 	return ""
 }
 
-// detectFeedURL attempts to find the actual RSS/Atom feed URL from a given URL.
 func detectFeedURL(rawURL string) (string, error) {
 	fp := gofeed.NewParser()
 	fp.Client = &http.Client{Timeout: 10 * time.Second}
 
-	// First, try to parse as feed directly
 	_, err := fp.ParseURL(rawURL)
 	if err == nil {
-		return rawURL, nil // it's a feed
+		return rawURL, nil
 	}
 
-	// Fetch the HTML page
 	resp, err := http.Get(rawURL)
 	if err != nil {
 		return "", err
@@ -74,7 +72,6 @@ func detectFeedURL(rawURL string) (string, error) {
 		return "", err
 	}
 
-	// Parse HTML to find <link rel="alternate" type="application/rss+xml" ...>
 	doc, err := html.Parse(bytes.NewReader(body))
 	if err != nil {
 		return "", err
@@ -106,7 +103,6 @@ func detectFeedURL(rawURL string) (string, error) {
 	}
 	f(doc)
 	if feedURL != "" {
-		// Resolve relative URL
 		if !strings.HasPrefix(feedURL, "http") {
 			base, err := url.Parse(rawURL)
 			if err != nil {
@@ -121,7 +117,6 @@ func detectFeedURL(rawURL string) (string, error) {
 		return feedURL, nil
 	}
 
-	// Try common paths
 	common := []string{"/feed", "/rss", "/atom", "/feed.xml", "/rss.xml", "/atom.xml"}
 	for _, path := range common {
 		u, err := url.Parse(rawURL)
@@ -309,7 +304,6 @@ func (s *Server) handleAddFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Auto-detect feed if needed
 	detected, err := detectFeedURL(req.FeedURL)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "could not find a feed at that URL: "+err.Error())
@@ -320,7 +314,6 @@ func (s *Server) handleAddFeed(w http.ResponseWriter, r *http.Request) {
 	var feedID int64
 	err = s.db.QueryRow("SELECT id FROM feeds WHERE feed_url=?", req.FeedURL).Scan(&feedID)
 	if err == sql.ErrNoRows {
-		// Validate by fetching before inserting.
 		fp := gofeed.NewParser()
 		fp.Client = &http.Client{Timeout: 20 * time.Second}
 		if _, perr := fp.ParseURL(req.FeedURL); perr != nil {
