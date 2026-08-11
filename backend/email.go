@@ -7,7 +7,7 @@ import (
 	"net/smtp"
 )
 
-func (s *Server) getSMTPConfig() (enabled bool, host, port, user, password, from, fromName string, tls bool) {
+func (s *Server) getSMTPConfig() (enabled bool, host, port, user, password, from, fromName string) {
 	enabledStr, _ := s.getSetting("smtp_enabled")
 	enabled = enabledStr == "1"
 	if !enabled {
@@ -19,9 +19,7 @@ func (s *Server) getSMTPConfig() (enabled bool, host, port, user, password, from
 	password, _ = s.getSetting("smtp_password")
 	from, _ = s.getSetting("smtp_from")
 	fromName, _ = s.getSetting("smtp_from_name")
-	tlsStr, _ := s.getSetting("smtp_tls")
-	tls = tlsStr != "0"
-	_ = tls // avoid unused variable warning (TLS is not currently implemented)
+	// TLS is currently not implemented; the setting is ignored.
 	if portStr == "" {
 		portStr = "587"
 	}
@@ -30,7 +28,7 @@ func (s *Server) getSMTPConfig() (enabled bool, host, port, user, password, from
 }
 
 func (s *Server) sendEmail(to, subject, bodyHTML string) error {
-	enabled, host, port, user, password, from, fromName, tls := s.getSMTPConfig()
+	enabled, host, port, user, password, from, fromName := s.getSMTPConfig()
 	if !enabled {
 		return fmt.Errorf("SMTP not enabled")
 	}
