@@ -154,9 +154,14 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Count existing users FIRST to decide if we should bypass the registration-disabled check.
+	var total int
+	s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&total)
+
 	// Check registration allowed (unless invite token provided)
 	allowReg, _ := s.getSetting("allow_registration")
-	if allowReg != "1" && req.InviteToken == "" {
+	// Allow registration if there are no users (this will be the admin account)
+	if total > 0 && allowReg != "1" && req.InviteToken == "" {
 		writeError(w, http.StatusForbidden, "public registration is disabled. Please use an invite link.")
 		return
 	}
@@ -190,9 +195,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// First registered user becomes admin.
-	var total int
-	s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&total)
+	// First registered user becomes admin (total was fetched earlier).
 	isAdmin := total == 0
 
 	res, err := s.db.Exec(
