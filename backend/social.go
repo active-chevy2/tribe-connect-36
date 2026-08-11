@@ -75,7 +75,7 @@ func (s *Server) postJSON(postID int64, userID int64, depth int) map[string]inte
 	}
 	// Visibility check: if private, only author and admins can see
 	if visibility == "private" {
-		u := currentUserFromID(userID) // we need a helper
+		u := s.loadUser(userID) // fixed: use s.loadUser instead of undefined currentUserFromID
 		if u == nil || (u.ID != uid && !u.IsAdmin) {
 			return nil
 		}
@@ -108,17 +108,9 @@ func (s *Server) postJSON(postID int64, userID int64, depth int) map[string]inte
 	}
 }
 
-// Helper to get user by ID
-func currentUserFromID(id int64) *User {
-	// We'll implement a quick load
-	row := s.db.QueryRow("SELECT "+userCols+" FROM users WHERE id=?", id)
-	u, _ := scanUser(row)
-	return u
-}
-
 type createPostReq struct {
 	Body       string `json:"body"`
-	Visibility string `json:"visibility"` // optional, defaults to global default
+	Visibility string `json:"visibility"`
 }
 
 func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
@@ -137,7 +129,6 @@ func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "post is too long (max 5000 chars)")
 		return
 	}
-	// Visibility: if provided, use it; else default from settings
 	vis := req.Visibility
 	if vis == "" || (vis != "public" && vis != "private") {
 		def, _ := s.getSetting("default_post_visibility")
@@ -183,7 +174,6 @@ func (s *Server) handleRepost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid repost target")
 		return
 	}
-	// Visibility: inherit from original post if reposting a post; for feed item, use default
 	vis := "public"
 	if req.RefType == "post" {
 		var v string
@@ -273,7 +263,6 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 	offset := (page - 1) * limit
 	filter := r.URL.Query().Get("filter")
 
-	// Build query with visibility filter
 	query := "SELECT id FROM posts"
 	args := []interface{}{}
 	where := []string{}
@@ -281,15 +270,13 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 		where = append(where, "(user_id IN (SELECT following_id FROM follows WHERE follower_id=?) OR user_id=?)")
 		args = append(args, uid, uid)
 	}
-	// Always filter: show public posts + private posts owned by viewer (or admin)
 	visCondition := "(visibility='public'"
 	if uid != 0 {
 		visCondition += " OR (visibility='private' AND user_id=?)"
 		args = append(args, uid)
-		// Admin sees all
 		u := currentUser(r)
 		if u != nil && u.IsAdmin {
-			visCondition = "1=1" // admin sees all
+			visCondition = "1=1"
 		}
 	}
 	visCondition += ")"
