@@ -150,13 +150,19 @@ async function submitAuth(isReg) {
       res = await API.login({ identifier: $('f-identifier'), password: $('f-password') });
     }
     API.setToken(res.token);
+    // Ensure user object exists
+    if (!res.user) {
+      throw new Error('Login succeeded but user data is missing. Please contact support.');
+    }
     state.user = res.user;
     state.needsAdmin = false;
-    toast('Welcome, ' + res.user.display_name + '!');
+    toast('Welcome, ' + (res.user.display_name || res.user.username || 'User') + '!');
     go('#/');
   } catch (e) {
     err.textContent = e.message;
     err.style.display = 'block';
+    // Log the error for debugging
+    console.error('Login/register error:', e);
   }
 }
 
@@ -301,7 +307,6 @@ function itemCard(it) {
 async function viewHome() {
   const filter = window._homeFilter || 'all';
   const v = shell('home', `<div><h1>Home</h1><div class="sub">Your social timeline</div></div>`);
-  // visibility toggle in composer
   const defaultVis = await getDefaultVisibility();
   v.innerHTML = `
     <div class="composer">
@@ -622,10 +627,8 @@ async function viewAdminInvites() {
 async function viewPublicPost(id) {
   const app = document.getElementById('app');
   app.className = '';
-  // Try to get post without auth
   let post;
   try {
-    // Temporarily remove token to force public access
     const tokenBackup = API.token;
     API.token = null;
     post = await API.post_(id);
@@ -634,7 +637,6 @@ async function viewPublicPost(id) {
     app.innerHTML = `<div class="auth-wrap"><div class="auth-card"><div class="empty"><span class="material-symbols-rounded">lock</span><div>This post is private or not found.</div></div></div></div>`;
     return;
   }
-  // Render a simple public view
   app.innerHTML = `
     <div class="auth-wrap" style="background:var(--md-background);padding:20px">
       <div class="auth-card" style="max-width:600px">
