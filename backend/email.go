@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/smtp"
-	"strconv"
-	"strings"
-	"text/template"
 )
 
 func (s *Server) getSMTPConfig() (enabled bool, host, port, user, password, from, fromName string, tls bool) {
@@ -24,7 +21,7 @@ func (s *Server) getSMTPConfig() (enabled bool, host, port, user, password, from
 	fromName, _ = s.getSetting("smtp_from_name")
 	tlsStr, _ := s.getSetting("smtp_tls")
 	tls = tlsStr != "0"
-	_ = tls // avoid unused variable warning (TLS is currently not implemented)
+	_ = tls // avoid unused variable warning (TLS is not currently implemented)
 	if portStr == "" {
 		portStr = "587"
 	}
@@ -46,7 +43,6 @@ func (s *Server) sendEmail(to, subject, bodyHTML string) error {
 	auth := smtp.PlainAuth("", user, password, host)
 	addr := host + ":" + port
 
-	// Build email
 	fromAddr := fmt.Sprintf("%s <%s>", fromName, from)
 	headers := make(map[string]string)
 	headers["From"] = fromAddr
