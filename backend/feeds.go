@@ -2,13 +2,14 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
-	"io"
-	"bytes"
 
 	"github.com/mmcdole/gofeed"
 	"golang.org/x/net/html"
@@ -49,17 +50,18 @@ func extractImage(item *gofeed.Item) string {
 }
 
 // detectFeedURL attempts to find the actual RSS/Atom feed URL from a given URL.
-func detectFeedURL(url string) (string, error) {
-	// First, try to parse as feed directly
+func detectFeedURL(rawURL string) (string, error) {
 	fp := gofeed.NewParser()
 	fp.Client = &http.Client{Timeout: 10 * time.Second}
-	_, err := fp.ParseURL(url)
+
+	// First, try to parse as feed directly
+	_, err := fp.ParseURL(rawURL)
 	if err == nil {
-		return url, nil // it's a feed
+		return rawURL, nil // it's a feed
 	}
 
 	// Fetch the HTML page
-	resp, err := http.Get(url)
+	resp, err := http.Get(rawURL)
 	if err != nil {
 		return "", err
 	}
@@ -106,8 +108,14 @@ func detectFeedURL(url string) (string, error) {
 	if feedURL != "" {
 		// Resolve relative URL
 		if !strings.HasPrefix(feedURL, "http") {
-			base, _ := url.Parse(url)
-			ref, _ := url.Parse(feedURL)
+			base, err := url.Parse(rawURL)
+			if err != nil {
+				return "", err
+			}
+			ref, err := url.Parse(feedURL)
+			if err != nil {
+				return "", err
+			}
 			feedURL = base.ResolveReference(ref).String()
 		}
 		return feedURL, nil
@@ -116,10 +124,13 @@ func detectFeedURL(url string) (string, error) {
 	// Try common paths
 	common := []string{"/feed", "/rss", "/atom", "/feed.xml", "/rss.xml", "/atom.xml"}
 	for _, path := range common {
-		u, _ := url.Parse(url)
+		u, err := url.Parse(rawURL)
+		if err != nil {
+			continue
+		}
 		u.Path = path
 		testURL := u.String()
-		_, err := fp.ParseURL(testURL)
+		_, err = fp.ParseURL(testURL)
 		if err == nil {
 			return testURL, nil
 		}
