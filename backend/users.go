@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/xml"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -16,7 +18,7 @@ func (s *Server) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var posts, followers, following int
-	s.db.QueryRow("SELECT COUNT(*) FROM posts WHERE user_id=?", u.ID).Scan(&posts)
+	s.db.QueryRow("SELECT COUNT(*) FROM posts WHERE user_id=? AND visibility='public'", u.ID).Scan(&posts)
 	s.db.QueryRow("SELECT COUNT(*) FROM follows WHERE following_id=?", u.ID).Scan(&followers)
 	s.db.QueryRow("SELECT COUNT(*) FROM follows WHERE follower_id=?", u.ID).Scan(&following)
 	isFollowing := false
@@ -47,8 +49,16 @@ func (s *Server) handleUserPosts(w http.ResponseWriter, r *http.Request) {
 		page = 1
 	}
 	limit := 20
-	rows, err := s.db.Query("SELECT id FROM posts WHERE user_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-		uid, limit, (page-1)*limit)
+	// Only show public posts + private if viewer is the user or admin
+	query := "SELECT id FROM posts WHERE user_id=? AND (visibility='public'"
+	args := []interface{}{uid}
+	if viewer != 0 && (viewer == uid || (currentUser(r) != nil && currentUser(r).IsAdmin)) {
+		query += " OR visibility='private'"
+	}
+	query += ") ORDER BY created_at DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, (page-1)*limit)
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not load posts")
 		return
@@ -90,9 +100,11 @@ func (s *Server) handleUnfollow(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateProfileReq struct {
-	DisplayName string `json:"display_name"`
-	Bio         string `json:"bio"`
-	AvatarURL   string `json:"avatar_url"`
+	DisplayName      string `json:"display_name"`
+	Bio              string `json:"bio"`
+	AvatarURL        string `json:"avatar_url"`
+	ProfileLink      string `json:"profile_link"`
+	ProfileLinkTitle string `json:"profile_link_title"`
 }
 
 func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
@@ -106,8 +118,8 @@ func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 	if display == "" {
 		display = u.DisplayName
 	}
-	s.db.Exec("UPDATE users SET display_name=?, bio=?, avatar_url=? WHERE id=?",
-		display, trimTo(req.Bio, 2000), trimTo(req.AvatarURL, 500), u.ID)
+	s.db.Exec("UPDATE users SET display_name=?, bio=?, avatar_url=?, profile_link=?, profile_link_title=? WHERE id=?",
+		display, trimTo(req.Bio, 2000), trimTo(req.AvatarURL, 500), trimTo(req.ProfileLink, 255), trimTo(req.ProfileLinkTitle, 100), u.ID)
 	writeJSON(w, http.StatusOK, s.loadUser(u.ID))
 }
 
@@ -137,4 +149,66 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 		out = append(out, p)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// ---- User RSS Feed ----
+func (s *Server) handleUserFeed(w http.ResponseWriter, r *http.Request) {
+	username := chi.URLParam(r, "username")
+	var uid int64
+	var displayName string
+	var avatarURL string
+	err := s.db.QueryRow("SELECT id, display_name, avatar_url FROM users WHERE username=?", username).Scan(&uid, &displayName, &avatarURL)
+	if err != nil {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	rows, err := s.db.Query("SELECT id, body, created_at FROM posts WHERE user_id=? AND visibility='public' ORDER BY created_at DESC LIMIT 50", uid)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type item struct {
+		Title string `xml:"title"`
+		Link  string `xml:"link"`
+		Guid  string `xml:"guid"`
+		PubDate string `xml:"pubDate"`
+		Description string `xml:"description"`
+	}
+	items := []item{}
+	for rows.Next() {
+		var id int64
+		var body string
+		var created time.Time
+		rows.Scan(&id, &body, &created)
+		items = append(items, item{
+			Title:       displayName + "'s post",
+			Link:        s.cfg.PublicBaseURL + "/#/p/post/" + fmt.Sprintf("%d", id),
+			Guid:        fmt.Sprintf("%d", id),
+			PubDate:     created.Format(time.RFC1123Z),
+			Description: body,
+		})
+	}
+
+	feed := struct {
+		XMLName xml.Name `xml:"rss"`
+		Version string   `xml:"version,attr"`
+		Channel struct {
+			Title       string `xml:"title"`
+			Link        string `xml:"link"`
+			Description string `xml:"description"`
+			Items       []item `xml:"item"`
+		} `xml:"channel"`
+	}{
+		Version: "2.0",
+	}
+	feed.Channel.Title = displayName + "'s feed"
+	feed.Channel.Link = s.cfg.PublicBaseURL + "/#/profile/" + username
+	feed.Channel.Description = "Public posts from " + displayName
+	feed.Channel.Items = items
+
+	w.Header().Set("Content-Type", "application/rss+xml")
+	xml.NewEncoder(w).Encode(feed)
 }
