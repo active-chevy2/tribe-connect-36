@@ -45,6 +45,8 @@ const API = {
   register(d) { return this.post('/auth/register', d); },
   login(d) { return this.post('/auth/login', d); },
   me() { return this.get('/auth/me'); },
+  forgotPassword(email) { return this.post('/auth/forgot', { email }); },
+  resetPassword(token, newPassword) { return this.post('/auth/reset', { token, new_password: newPassword }); },
 
   // feeds & items
   feeds() { return this.get('/feeds'); },
@@ -58,7 +60,7 @@ const API = {
 
   // social
   timeline(filter, page) { return this.get('/timeline?filter=' + filter + '&page=' + page); },
-  createPost(body) { return this.post('/posts', { body }); },
+  createPost(body, visibility) { return this.post('/posts', { body, visibility }); },
   post_(id) { return this.get('/posts/' + id); },
   deletePost(id) { return this.del('/posts/' + id); },
   repost(t, id) { return this.post('/repost', { ref_type: t, ref_id: id }); },
@@ -77,4 +79,15 @@ const API = {
   follow(id) { return this.post('/users/' + id + '/follow'); },
   unfollow(id) { return this.del('/users/' + id + '/follow'); },
   updateProfile(d) { return this.put('/profile', d); },
+  userFeed(username) { return this.get('/users/' + username + '/feed'); }, // returns XML
+
+  // invites
+  invites() { return this.get('/invites'); },
+  createInvite() { return this.post('/invites'); },
+  revokeInvite(id) { return this.del('/invites/' + id); },
+
+  // settings (admin)
+  getSettings() { return this.get('/settings'); },
+  updateSettings(settings) { return this.put('/settings', settings); },
+  adminUpdatePost(postId, visibility) { return this.put('/admin/posts/' + postId, { visibility }); },
 };
