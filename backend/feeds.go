@@ -7,8 +7,11 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"io"
+	"bytes"
 
 	"github.com/mmcdole/gofeed"
+	"golang.org/x/net/html"
 )
 
 var imgRe = regexp.MustCompile(`(?i)<img[^>]+src=["']([^"']+)["']`)
@@ -43,6 +46,85 @@ func extractImage(item *gofeed.Item) string {
 		return m[1]
 	}
 	return ""
+}
+
+// detectFeedURL attempts to find the actual RSS/Atom feed URL from a given URL.
+func detectFeedURL(url string) (string, error) {
+	// First, try to parse as feed directly
+	fp := gofeed.NewParser()
+	fp.Client = &http.Client{Timeout: 10 * time.Second}
+	_, err := fp.ParseURL(url)
+	if err == nil {
+		return url, nil // it's a feed
+	}
+
+	// Fetch the HTML page
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	// Parse HTML to find <link rel="alternate" type="application/rss+xml" ...>
+	doc, err := html.Parse(bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	var feedURL string
+	var f func(*html.Node)
+	f = func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "link" {
+			var rel, href, typ string
+			for _, attr := range n.Attr {
+				if attr.Key == "rel" {
+					rel = attr.Val
+				}
+				if attr.Key == "href" {
+					href = attr.Val
+				}
+				if attr.Key == "type" {
+					typ = attr.Val
+				}
+			}
+			if strings.Contains(rel, "alternate") && (strings.Contains(typ, "rss") || strings.Contains(typ, "atom")) {
+				feedURL = href
+				return
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			f(c)
+		}
+	}
+	f(doc)
+	if feedURL != "" {
+		// Resolve relative URL
+		if !strings.HasPrefix(feedURL, "http") {
+			base, _ := url.Parse(url)
+			ref, _ := url.Parse(feedURL)
+			feedURL = base.ResolveReference(ref).String()
+		}
+		return feedURL, nil
+	}
+
+	// Try common paths
+	common := []string{"/feed", "/rss", "/atom", "/feed.xml", "/rss.xml", "/atom.xml"}
+	for _, path := range common {
+		u, _ := url.Parse(url)
+		u.Path = path
+		testURL := u.String()
+		_, err := fp.ParseURL(testURL)
+		if err == nil {
+			return testURL, nil
+		}
+	}
+	return "", fmt.Errorf("could not detect feed URL")
 }
 
 func (s *Server) fetchAndStoreFeed(feedID int64, feedURL string) error {
@@ -216,8 +298,16 @@ func (s *Server) handleAddFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-detect feed if needed
+	detected, err := detectFeedURL(req.FeedURL)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "could not find a feed at that URL: "+err.Error())
+		return
+	}
+	req.FeedURL = detected
+
 	var feedID int64
-	err := s.db.QueryRow("SELECT id FROM feeds WHERE feed_url=?", req.FeedURL).Scan(&feedID)
+	err = s.db.QueryRow("SELECT id FROM feeds WHERE feed_url=?", req.FeedURL).Scan(&feedID)
 	if err == sql.ErrNoRows {
 		// Validate by fetching before inserting.
 		fp := gofeed.NewParser()
