@@ -7,7 +7,7 @@ import (
 
 func (s *Server) getSetting(key string) (string, error) {
 	var val string
-	err := s.db.QueryRow("SELECT value FROM settings WHERE key=?", key).Scan(&val)
+	err := s.db.QueryRow("SELECT `value` FROM settings WHERE `key`=?", key).Scan(&val)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
@@ -15,7 +15,7 @@ func (s *Server) getSetting(key string) (string, error) {
 }
 
 func (s *Server) setSetting(key, value string) error {
-	_, err := s.db.Exec("INSERT INTO settings (key, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value=?", key, value, value)
+	_, err := s.db.Exec("INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value`=?", key, value, value)
 	return err
 }
 
@@ -27,7 +27,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "admin required")
 		return
 	}
-	rows, err := s.db.Query("SELECT key, value FROM settings")
+	rows, err := s.db.Query("SELECT `key`, `value` FROM settings")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not load settings")
 		return
