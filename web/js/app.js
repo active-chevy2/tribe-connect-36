@@ -20,32 +20,44 @@ function go(hash) {
 
 /* ---------------- router ---------------- */
 async function render() {
-  if (!state.user && !location.hash.startsWith('#/p/') && !location.hash.startsWith('#/reset-password') && !location.hash.startsWith('#/forgot-password') && !location.hash.startsWith('#/register')) {
-    renderAuth(); return;
-  }
   const hash = location.hash || '#/';
   const parts = hash.slice(2).split('/'); // drop "#/"
   const [seg, arg, arg2] = parts;
+
+  // Define routes that can be accessed without logging in
+  const publicRoutes = ['', 'explore', 'people', 'profile', 'post', 'feed_item', 'p', 'login', 'register', 'forgot-password', 'reset-password'];
+
+  if (!state.user && !publicRoutes.includes(seg)) {
+    renderAuth(); return;
+  }
+
   try {
-    if (seg === 'p' && arg === 'post') return viewPublicPost(arg2);
-    if (seg === 'register') {
+    if (seg === 'login') { state.authMode = 'login'; renderAuth(); return; }
+    if (seg === 'register') { 
+      state.authMode = 'register'; 
       const params = new URLSearchParams(location.hash.split('?')[1] || '');
       const invite = params.get('invite');
-      renderAuth(invite); return;
+      renderAuth(invite); return; 
     }
+    if (seg === 'p' && arg === 'post') return viewPublicPost(arg2);
     if (seg === 'forgot-password') return renderForgotPassword();
     if (seg === 'reset-password') {
       const params = new URLSearchParams(location.hash.split('?')[1] || '');
       const token = params.get('token');
       renderResetPassword(token); return;
     }
-    if (!state.user) { renderAuth(); return; }
+    
+    // Require auth for admin routes
+    if (!state.user && seg === 'admin') {
+      renderAuth(); return;
+    }
+
     if (seg === 'admin' && arg === 'settings') return viewAdminSettings();
     if (seg === 'admin' && arg === 'invites') return viewAdminInvites();
     if (!seg || seg === '') return viewHome();
     if (seg === 'explore') return viewExplore();
     if (seg === 'people') return viewPeople();
-    if (seg === 'profile') return viewProfile(arg || state.user.username);
+    if (seg === 'profile') return viewProfile(arg || (state.user ? state.user.username : ''));
     if (seg === 'post') return viewDetail('post', arg);
     if (seg === 'feed_item') return viewDetail('feed_item', arg);
     return viewHome();
@@ -62,7 +74,8 @@ const NAV = [
 
 function navHTML(active, cls, itemCls) {
   return NAV.map(n => {
-    const href = n.key === 'profile' ? '#/profile/' + state.user.username : n.href;
+    if (n.key === 'profile' && !state.user) return '';
+    const href = n.key === 'profile' && state.user ? '#/profile/' + state.user.username : n.href;
     const on = n.key === active ? ' active' : '';
     return `<a class="${itemCls}${on}" href="${href}" data-testid="nav-${n.key}">
       <span class="icon-pill"><span class="material-symbols-rounded">${n.icon}</span></span>${n.label}</a>`;
@@ -73,30 +86,45 @@ function shell(active, topbarHTML, opts) {
   opts = opts || {};
   const app = document.getElementById('app');
   app.className = opts.wide ? 'wide' : '';
+
+  const userActions = state.user ? `
+    ${state.user.is_admin ? `<button class="icon-btn" data-act="admin-settings" title="Admin" data-testid="admin-settings-btn"><span class="material-symbols-rounded">settings</span></button>` : ''}
+    <button class="icon-btn" data-act="toggle-theme" title="Toggle theme" data-testid="theme-toggle"><span class="material-symbols-rounded">dark_mode</span></button>
+    <button class="icon-btn" data-act="logout" title="Log out" data-testid="logout-btn"><span class="material-symbols-rounded">logout</span></button>
+  ` : `
+    <button class="icon-btn" data-act="toggle-theme" title="Toggle theme" data-testid="theme-toggle"><span class="material-symbols-rounded">dark_mode</span></button>
+    <a href="#/login" class="btn btn-outline btn-sm" style="margin-left:8px; height:32px;">Log in</a>
+  `;
+
+  const userActionsMobile = state.user ? `
+    ${state.user.is_admin ? `<button class="icon-btn" data-act="admin-settings" title="Admin"><span class="material-symbols-rounded">settings</span></button>` : ''}
+    <button class="icon-btn" data-act="toggle-theme" title="Toggle theme"><span class="material-symbols-rounded">dark_mode</span></button>
+    <button class="icon-btn" data-act="logout" title="Log out"><span class="material-symbols-rounded">logout</span></button>
+  ` : `
+    <button class="icon-btn" data-act="toggle-theme" title="Toggle theme"><span class="material-symbols-rounded">dark_mode</span></button>
+    <a href="#/login" class="btn btn-outline btn-sm" style="margin-left:4px; height:32px;">Log in</a>
+  `;
+
   app.innerHTML = `
     <div class="shell">
       <nav class="rail" data-testid="rail-nav">
         <div class="brand" title="Conflux">C</div>
         ${navHTML(active, 'rail', 'rail-item')}
         <div class="spacer"></div>
-        ${state.user.is_admin ? `<button class="icon-btn" data-act="admin-settings" title="Admin" data-testid="admin-settings-btn"><span class="material-symbols-rounded">settings</span></button>` : ''}
-        <button class="icon-btn" data-act="toggle-theme" title="Toggle theme" data-testid="theme-toggle"><span class="material-symbols-rounded">dark_mode</span></button>
-        <button class="icon-btn" data-act="logout" title="Log out" data-testid="logout-btn"><span class="material-symbols-rounded">logout</span></button>
+        ${userActions}
       </nav>
       <div class="main">
         <header class="topbar">
           ${topbarHTML}
           <div class="mobile-top-actions">
-            ${state.user.is_admin ? `<button class="icon-btn" data-act="admin-settings" title="Admin"><span class="material-symbols-rounded">settings</span></button>` : ''}
-            <button class="icon-btn" data-act="toggle-theme" title="Toggle theme"><span class="material-symbols-rounded">dark_mode</span></button>
-            <button class="icon-btn" data-act="logout" title="Log out"><span class="material-symbols-rounded">logout</span></button>
+            ${userActionsMobile}
           </div>
         </header>
         <div class="content" id="view"></div>
       </div>
     </div>
     <nav class="navbar" data-testid="bottom-nav">${navHTML(active, 'nav', 'nav-item')}</nav>
-    <button class="fab" data-act="compose" data-testid="fab-compose"><span class="material-symbols-rounded">edit</span>Post</button>`;
+    ${state.user ? `<button class="fab" data-act="compose" data-testid="fab-compose"><span class="material-symbols-rounded">edit</span>Post</button>` : ''}`;
   return document.getElementById('view');
 }
 
@@ -139,6 +167,9 @@ async function renderAuth(inviteToken) {
           ${isReg ? 'Already have an account?' : "Don't have an account?"}
           <button data-act="switch-auth" data-testid="switch-auth">${isReg ? 'Sign in' : 'Sign up'}</button>
         </div>`}
+        <div class="auth-switch" style="margin-top:24px;">
+          <a href="#/" style="display:inline-flex; align-items:center; gap:4px; font-weight:600;"><span class="material-symbols-rounded" style="font-size:18px;">arrow_back</span> Return to site</a>
+        </div>
       </div>
     </div>`;
   document.getElementById('auth-form').addEventListener('submit', (e) => { e.preventDefault(); submitAuth(isReg); });
@@ -157,7 +188,6 @@ async function submitAuth(isReg) {
       res = await API.login({ identifier: $('f-identifier'), password: $('f-password') });
     }
     API.setToken(res.token);
-    // Ensure user object exists
     if (!res.user) {
       throw new Error('Login succeeded but user data is missing. Please contact support.');
     }
@@ -168,7 +198,6 @@ async function submitAuth(isReg) {
   } catch (e) {
     err.textContent = e.message;
     err.style.display = 'block';
-    // Log the error for debugging
     console.error('Login/register error:', e);
   }
 }
@@ -187,7 +216,7 @@ function renderForgotPassword() {
           <div class="field"><label>Email address</label><input id="f-email" type="email" required data-testid="forgot-email"/></div>
           <button type="submit" class="btn btn-filled" style="width:100%;height:48px">Send reset link</button>
         </form>
-        <div class="auth-switch"><a href="#/">Back to login</a></div>
+        <div class="auth-switch"><a href="#/login">Back to login</a></div>
       </div>
     </div>`;
   document.getElementById('forgot-form').addEventListener('submit', async (e) => {
@@ -197,7 +226,7 @@ function renderForgotPassword() {
     try {
       await API.forgotPassword(email);
       toast('If that email exists, a reset link has been sent.');
-      setTimeout(() => go('#/'), 2000);
+      setTimeout(() => go('#/login'), 2000);
     } catch (e) { document.getElementById('reset-err').textContent = e.message; document.getElementById('reset-err').style.display = 'block'; }
   });
 }
@@ -215,7 +244,7 @@ function renderResetPassword(token) {
           <div class="field"><label>New password</label><input id="f-password" type="password" required minlength="6" data-testid="reset-password"/></div>
           <button type="submit" class="btn btn-filled" style="width:100%;height:48px">Update password</button>
         </form>
-        <div class="auth-switch"><a href="#/">Back to login</a></div>
+        <div class="auth-switch"><a href="#/login">Back to login</a></div>
       </div>
     </div>`;
   document.getElementById('reset-form').addEventListener('submit', async (e) => {
@@ -225,7 +254,7 @@ function renderResetPassword(token) {
     try {
       await API.resetPassword(token, newPassword);
       toast('Password updated! Please log in.');
-      go('#/');
+      go('#/login');
     } catch (e) { document.getElementById('reset-err').textContent = e.message; document.getElementById('reset-err').style.display = 'block'; }
   });
 }
@@ -312,61 +341,91 @@ function itemCard(it) {
 
 /* ---------------- views ---------------- */
 async function viewHome() {
-  const filter = window._homeFilter || 'all';
+  const filter = state.user ? (window._homeFilter || 'all') : 'all';
   const v = shell('home', `<div><h1>Home</h1><div class="sub">Your social timeline</div></div>`);
-  const defaultVis = await getDefaultVisibility();
-  v.innerHTML = `
-    <div class="composer">
-      <div style="display:flex;gap:10px">${avatarHTML(state.user)}
-        <textarea id="home-composer" rows="2" placeholder="Share something with the community…" data-testid="home-composer"></textarea></div>
-      <div class="composer-foot">
-        <span class="count" id="home-count">0 / 5000</span>
-        <select id="home-visibility" data-testid="post-visibility">
-          <option value="public" ${defaultVis === 'public' ? 'selected' : ''}>Public</option>
-          <option value="private" ${defaultVis === 'private' ? 'selected' : ''}>Private</option>
-        </select>
-        <button class="btn btn-filled btn-sm" id="home-post" data-testid="home-post-btn">Post</button>
-      </div>
-    </div>
-    <div class="tabs">
-      <button class="chip ${filter === 'all' ? 'active' : ''}" data-act="home-filter" data-f="all" data-testid="tab-foryou">For you</button>
-      <button class="chip ${filter === 'following' ? 'active' : ''}" data-act="home-filter" data-f="following" data-testid="tab-following">Following</button>
-    </div>
-    <div id="feed"></div>`;
-  const ta = v.querySelector('#home-composer');
-  ta.addEventListener('input', () => v.querySelector('#home-count').textContent = ta.value.length + ' / 5000');
-  v.querySelector('#home-post').addEventListener('click', async () => {
-    const b = ta.value.trim(); if (!b) { toast('Write something first'); return; }
-    const vis = v.querySelector('#home-visibility').value;
-    try { await API.createPost(b, vis); toast('Posted'); render(); } catch (e) { toast(e.message); }
-  });
+  
+  let composerHTML = '';
+  let tabsHTML = '';
+
+  if (state.user) {
+    const defaultVis = await getDefaultVisibility();
+    composerHTML = `
+      <div class="composer">
+        <div style="display:flex;gap:10px">${avatarHTML(state.user)}
+          <textarea id="home-composer" rows="2" placeholder="Share something with the community…" data-testid="home-composer"></textarea></div>
+        <div class="composer-foot">
+          <span class="count" id="home-count">0 / 5000</span>
+          <select id="home-visibility" data-testid="post-visibility">
+            <option value="public" ${defaultVis === 'public' ? 'selected' : ''}>Public</option>
+            <option value="private" ${defaultVis === 'private' ? 'selected' : ''}>Private</option>
+          </select>
+          <button class="btn btn-filled btn-sm" id="home-post" data-testid="home-post-btn">Post</button>
+        </div>
+      </div>`;
+    tabsHTML = `
+      <div class="tabs">
+        <button class="chip ${filter === 'all' ? 'active' : ''}" data-act="home-filter" data-f="all" data-testid="tab-foryou">For you</button>
+        <button class="chip ${filter === 'following' ? 'active' : ''}" data-act="home-filter" data-f="following" data-testid="tab-following">Following</button>
+      </div>`;
+  } else {
+    composerHTML = `
+      <div class="card" style="text-align:center; padding:24px 16px; margin-bottom:20px;">
+        <p style="margin-bottom:12px; font-weight:600; color:var(--md-on-surface-variant);">Join the conversation</p>
+        <a href="#/login" class="btn btn-filled">Log in or Sign up</a>
+      </div>`;
+  }
+
+  v.innerHTML = composerHTML + tabsHTML + `<div id="feed"></div>`;
+  
+  if (state.user) {
+    const ta = v.querySelector('#home-composer');
+    ta.addEventListener('input', () => v.querySelector('#home-count').textContent = ta.value.length + ' / 5000');
+    v.querySelector('#home-post').addEventListener('click', async () => {
+      const b = ta.value.trim(); if (!b) { toast('Write something first'); return; }
+      const vis = v.querySelector('#home-visibility').value;
+      try { await API.createPost(b, vis); toast('Posted'); render(); } catch (e) { toast(e.message); }
+    });
+  }
+
   paginate(v.querySelector('#feed'), postCard, (page) => API.timeline(filter, page), 'Say something or follow people to fill your timeline', 'forum');
 }
 
 async function viewExplore() {
-  const filter = window._exFilter || 'all';
-  const v = shell('explore', `<div><h1>Explore</h1><div class="sub">Latest from every feed</div></div><div class="grow"></div>
-    <button class="btn btn-tonal btn-sm" data-act="manage-feeds" data-testid="manage-feeds-btn"><span class="material-symbols-rounded">tune</span>Manage feeds</button>`);
-  v.innerHTML = `
-    <div class="addfeed">
-      <input id="feed-url" placeholder="Paste an RSS / Atom feed URL…" data-testid="feed-url-input"/>
-      <button class="btn btn-filled" id="add-feed" data-testid="add-feed-btn"><span class="material-symbols-rounded">add</span>Add</button>
-    </div>
-    <div class="tabs">
-      <button class="chip ${filter === 'all' ? 'active' : ''}" data-act="ex-filter" data-f="all" data-testid="tab-all-items">All items</button>
-      <button class="chip ${filter === 'subscribed' ? 'active' : ''}" data-act="ex-filter" data-f="subscribed" data-testid="tab-subscribed">Subscribed</button>
-    </div>
-    <div id="feed"></div>`;
-  const input = v.querySelector('#feed-url');
-  const addBtn = v.querySelector('#add-feed');
-  const doAdd = async () => {
-    const url = input.value.trim(); if (!url) { toast('Enter a feed URL'); return; }
-    addBtn.disabled = true; addBtn.innerHTML = '<span class="material-symbols-rounded">hourglass_top</span>Adding';
-    try { const f = await API.addFeed(url); toast('Subscribed to ' + (f.title || 'feed')); input.value = ''; render(); }
-    catch (e) { toast(e.message); addBtn.disabled = false; addBtn.innerHTML = '<span class="material-symbols-rounded">add</span>Add'; }
-  };
-  addBtn.addEventListener('click', doAdd);
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doAdd(); });
+  const filter = state.user ? (window._exFilter || 'all') : 'all';
+  const topAction = state.user ? `<button class="btn btn-tonal btn-sm" data-act="manage-feeds" data-testid="manage-feeds-btn"><span class="material-symbols-rounded">tune</span>Manage feeds</button>` : '';
+  const v = shell('explore', `<div><h1>Explore</h1><div class="sub">Latest from every feed</div></div><div class="grow"></div>${topAction}`);
+  
+  let addFeedHTML = '';
+  let tabsHTML = '';
+  
+  if (state.user) {
+    addFeedHTML = `
+      <div class="addfeed">
+        <input id="feed-url" placeholder="Paste an RSS / Atom feed URL…" data-testid="feed-url-input"/>
+        <button class="btn btn-filled" id="add-feed" data-testid="add-feed-btn"><span class="material-symbols-rounded">add</span>Add</button>
+      </div>`;
+    tabsHTML = `
+      <div class="tabs">
+        <button class="chip ${filter === 'all' ? 'active' : ''}" data-act="ex-filter" data-f="all" data-testid="tab-all-items">All items</button>
+        <button class="chip ${filter === 'subscribed' ? 'active' : ''}" data-act="ex-filter" data-f="subscribed" data-testid="tab-subscribed">Subscribed</button>
+      </div>`;
+  }
+
+  v.innerHTML = addFeedHTML + tabsHTML + `<div id="feed"></div>`;
+  
+  if (state.user) {
+    const input = v.querySelector('#feed-url');
+    const addBtn = v.querySelector('#add-feed');
+    const doAdd = async () => {
+      const url = input.value.trim(); if (!url) { toast('Enter a feed URL'); return; }
+      addBtn.disabled = true; addBtn.innerHTML = '<span class="material-symbols-rounded">hourglass_top</span>Adding';
+      try { const f = await API.addFeed(url); toast('Subscribed to ' + (f.title || 'feed')); input.value = ''; render(); }
+      catch (e) { toast(e.message); addBtn.disabled = false; addBtn.innerHTML = '<span class="material-symbols-rounded">add</span>Add'; }
+    };
+    addBtn.addEventListener('click', doAdd);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doAdd(); });
+  }
+
   paginate(v.querySelector('#feed'), itemCard, (page) => API.items(filter, page),
     filter === 'subscribed' ? 'Subscribe to feeds to see items here' : 'No feed items yet — add a feed above', 'rss_feed');
 }
@@ -386,7 +445,7 @@ async function viewPeople() {
           ${u.bio ? `<div class="handle" style="margin-top:4px">${esc(u.bio)}</div>` : ''}
           ${u.profile_link ? `<div><a href="${esc(u.profile_link)}" target="_blank" rel="noopener" class="handle">${esc(u.profile_link_title || u.profile_link)}</a></div>` : ''}
         </div>
-        ${u.is_self ? '' : followBtn(u)}
+        ${state.user ? (u.is_self ? '' : followBtn(u)) : ''}
       </div>
     </div>`).join('');
 }
@@ -397,11 +456,20 @@ function followBtn(u) {
 }
 
 async function viewProfile(username) {
+  if (!username) { go('#/'); return; } // Fallback for invalid state
   const v = shell('profile', `<div><h1>Profile</h1><div class="sub">@${esc(username)}</div></div>`);
   v.innerHTML = spinnerHTML();
   let p;
   try { p = await API.profile(username); } catch (e) { v.innerHTML = emptyHTML('User not found', 'person_off'); return; }
   const profileLinkHtml = p.profile_link ? `<div><a href="${esc(p.profile_link)}" target="_blank" rel="noopener" class="handle" style="font-size:14px">${esc(p.profile_link_title || p.profile_link)}</a></div>` : '';
+  
+  let actionBtn = '';
+  if (state.user) {
+    actionBtn = p.is_self
+      ? `<button class="btn btn-outline btn-sm" data-act="edit-profile" data-testid="edit-profile-btn">Edit profile</button>`
+      : followBtn(Object.assign({}, p));
+  }
+
   v.innerHTML = `
     <div class="card">
       <div class="profile-head">
@@ -411,9 +479,7 @@ async function viewProfile(username) {
           <div class="handle">@${esc(p.username)}</div>
           ${profileLinkHtml}
         </div>
-        ${p.is_self
-          ? `<button class="btn btn-outline btn-sm" data-act="edit-profile" data-testid="edit-profile-btn">Edit profile</button>`
-          : followBtn(Object.assign({}, p))}
+        ${actionBtn}
       </div>
       ${p.bio ? `<div class="post-body" style="margin-top:6px">${esc(p.bio)}</div>` : ''}
       <div class="profile-stats">
@@ -450,31 +516,49 @@ async function viewDetail(tt, id) {
   } else {
     head = postCard(obj);
   }
+
+  let composerHTML = '';
+  if (state.user) {
+    composerHTML = `
+      <div class="composer">
+        <div style="display:flex;gap:10px">${avatarHTML(state.user)}
+          <textarea id="c-input" rows="2" placeholder="Add a comment…" data-testid="comment-input"></textarea></div>
+        <div class="composer-foot"><span class="count" id="c-parent-lbl"></span>
+          <button class="btn btn-filled btn-sm" id="c-post" data-testid="comment-submit">Comment</button></div>
+      </div>`;
+  } else {
+    composerHTML = `
+      <div class="card" style="text-align:center; padding:16px; margin-bottom: 20px;">
+        <p style="margin-bottom:8px; font-size:14px;">Sign in to leave a comment.</p>
+        <a href="#/login" class="btn btn-outline btn-sm">Log in</a>
+      </div>`;
+  }
+
   v.innerHTML = `${head}
     <div class="section-title">Comments</div>
-    <div class="composer">
-      <div style="display:flex;gap:10px">${avatarHTML(state.user)}
-        <textarea id="c-input" rows="2" placeholder="Add a comment…" data-testid="comment-input"></textarea></div>
-      <div class="composer-foot"><span class="count" id="c-parent-lbl"></span>
-        <button class="btn btn-filled btn-sm" id="c-post" data-testid="comment-submit">Comment</button></div>
-    </div>
+    ${composerHTML}
     <div id="comments"></div>`;
 
   let parentId = null;
-  const cinput = v.querySelector('#c-input');
-  const plbl = v.querySelector('#c-parent-lbl');
-  v._setReply = (pid, name) => {
-    parentId = pid; plbl.innerHTML = pid ? `Replying to <b>${esc(name)}</b> · <button class="btn btn-text btn-sm" style="height:auto;padding:0" id="cancel-reply">cancel</button>` : '';
-    if (pid) { cinput.focus(); const cr = v.querySelector('#cancel-reply'); if (cr) cr.addEventListener('click', () => v._setReply(null)); }
-  };
-  v.querySelector('#c-post').addEventListener('click', async () => {
-    const b = cinput.value.trim(); if (!b) { toast('Write a comment'); return; }
-    try {
-      await API.addComment({ target_type: tt, target_id: Number(id), parent_id: parentId, body: b });
-      cinput.value = ''; v._setReply(null); loadComments(tt, id, v.querySelector('#comments'), v);
-      toast('Comment added');
-    } catch (e) { toast(e.message); }
-  });
+  if (state.user) {
+    const cinput = v.querySelector('#c-input');
+    const plbl = v.querySelector('#c-parent-lbl');
+    v._setReply = (pid, name) => {
+      parentId = pid; plbl.innerHTML = pid ? `Replying to <b>${esc(name)}</b> · <button class="btn btn-text btn-sm" style="height:auto;padding:0" id="cancel-reply">cancel</button>` : '';
+      if (pid) { cinput.focus(); const cr = v.querySelector('#cancel-reply'); if (cr) cr.addEventListener('click', () => v._setReply(null)); }
+    };
+    v.querySelector('#c-post').addEventListener('click', async () => {
+      const b = cinput.value.trim(); if (!b) { toast('Write a comment'); return; }
+      try {
+        await API.addComment({ target_type: tt, target_id: Number(id), parent_id: parentId, body: b });
+        cinput.value = ''; v._setReply(null); loadComments(tt, id, v.querySelector('#comments'), v);
+        toast('Comment added');
+      } catch (e) { toast(e.message); }
+    });
+  } else {
+    v._setReply = () => { toast('Please log in to reply'); go('#/login'); };
+  }
+  
   loadComments(tt, id, v.querySelector('#comments'), v);
 }
 
@@ -662,6 +746,20 @@ async function onGlobalAction(e) {
   if (!el) return;
   const act = el.dataset.act;
 
+  // Intercept actions that require an authenticated user
+  const authRequired = [
+    'compose', 'manage-feeds', 'edit-profile', 'follow', 'unfollow', 
+    'delete-post', 'like-comment', 'reply-comment', 'delete-comment', 
+    'sub-feed', 'unsub-feed', 'refresh-feed', 'delete-feed', 
+    'react', 'repost', 'quote', 'comment'
+  ];
+  
+  if (!state.user && authRequired.includes(act)) {
+    toast('Please log in to interact');
+    go('#/login');
+    return;
+  }
+
   if (act === 'open') { e.preventDefault(); go(el.dataset.href); return; }
   if (act === 'back') { history.length > 1 ? history.back() : go('#/'); return; }
   if (act === 'logout') { API.setToken(null); state.user = null; go('#/'); toast('Logged out'); return; }
@@ -735,6 +833,12 @@ async function cardAction(act, tt, id, my, btn) {
   }
   if (act === 'quote') { openQuote(tt, id); return; }
   if (act === 'share') {
+    if (!state.user) {
+      const url = location.origin + '/#/p/' + tt + '/' + id;
+      if (navigator.clipboard) { await navigator.clipboard.writeText(url); toast('Link copied to clipboard'); }
+      else toast('Share link: ' + url);
+      return;
+    }
     try {
       const res = await API.share(tt, id);
       const url = location.origin + '/#/p/' + tt + '/' + id;
