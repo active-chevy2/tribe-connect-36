@@ -1,14 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mmcdole/gofeed"
+	"golang.org/x/net/html"
 )
 
 var imgRe = regexp.MustCompile(`(?i)<img[^>]+src=["']([^"']+)["']`)
@@ -43,6 +49,89 @@ func extractImage(item *gofeed.Item) string {
 		return m[1]
 	}
 	return ""
+}
+
+func detectFeedURL(rawURL string) (string, error) {
+	fp := gofeed.NewParser()
+	fp.Client = &http.Client{Timeout: 10 * time.Second}
+
+	_, err := fp.ParseURL(rawURL)
+	if err == nil {
+		return rawURL, nil
+	}
+
+	resp, err := http.Get(rawURL)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	doc, err := html.Parse(bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	var feedURL string
+	var f func(*html.Node)
+	f = func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "link" {
+			var rel, href, typ string
+			for _, attr := range n.Attr {
+				if attr.Key == "rel" {
+					rel = attr.Val
+				}
+				if attr.Key == "href" {
+					href = attr.Val
+				}
+				if attr.Key == "type" {
+					typ = attr.Val
+				}
+			}
+			if strings.Contains(rel, "alternate") && (strings.Contains(typ, "rss") || strings.Contains(typ, "atom")) {
+				feedURL = href
+				return
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			f(c)
+		}
+	}
+	f(doc)
+	if feedURL != "" {
+		if !strings.HasPrefix(feedURL, "http") {
+			base, err := url.Parse(rawURL)
+			if err != nil {
+				return "", err
+			}
+			ref, err := url.Parse(feedURL)
+			if err != nil {
+				return "", err
+			}
+			feedURL = base.ResolveReference(ref).String()
+		}
+		return feedURL, nil
+	}
+
+	common := []string{"/feed", "/rss", "/atom", "/feed.xml", "/rss.xml", "/atom.xml"}
+	for _, path := range common {
+		u, err := url.Parse(rawURL)
+		if err != nil {
+			continue
+		}
+		u.Path = path
+		testURL := u.String()
+		_, err = fp.ParseURL(testURL)
+		if err == nil {
+			return testURL, nil
+		}
+	}
+	return "", fmt.Errorf("could not detect feed URL")
 }
 
 func (s *Server) fetchAndStoreFeed(feedID int64, feedURL string) error {
@@ -114,11 +203,23 @@ func (s *Server) refreshAllFeeds() {
 		feeds = append(feeds, x)
 	}
 	rows.Close()
+
+	// Implement bounded concurrency (max 5 simultaneous fetches)
+	sem := make(chan struct{}, 5)
+	var wg sync.WaitGroup
+
 	for _, x := range feeds {
-		if err := s.fetchAndStoreFeed(x.id, x.url); err != nil {
-			log.Printf("feed refresh error [%s]: %v", x.url, err)
-		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(feedID int64, feedURL string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if err := s.fetchAndStoreFeed(feedID, feedURL); err != nil {
+				log.Printf("feed refresh error [%s]: %v", feedURL, err)
+			}
+		}(x.id, x.url)
 	}
+	wg.Wait()
 }
 
 func (s *Server) feedWorker() {
@@ -216,10 +317,16 @@ func (s *Server) handleAddFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	detected, err := detectFeedURL(req.FeedURL)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "could not find a feed at that URL: "+err.Error())
+		return
+	}
+	req.FeedURL = detected
+
 	var feedID int64
-	err := s.db.QueryRow("SELECT id FROM feeds WHERE feed_url=?", req.FeedURL).Scan(&feedID)
+	err = s.db.QueryRow("SELECT id FROM feeds WHERE feed_url=?", req.FeedURL).Scan(&feedID)
 	if err == sql.ErrNoRows {
-		// Validate by fetching before inserting.
 		fp := gofeed.NewParser()
 		fp.Client = &http.Client{Timeout: 20 * time.Second}
 		if _, perr := fp.ParseURL(req.FeedURL); perr != nil {

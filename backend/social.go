@@ -61,16 +61,24 @@ func (s *Server) postJSON(postID int64, userID int64, depth int) map[string]inte
 		body              sql.NullString
 		refType           sql.NullString
 		refID             sql.NullInt64
+		visibility        string
 		createdAt         time.Time
 		username, display sql.NullString
 		avatar            sql.NullString
 	)
-	err := s.db.QueryRow(`SELECT p.id, p.user_id, p.kind, p.body, p.ref_type, p.ref_id, p.created_at,
+	err := s.db.QueryRow(`SELECT p.id, p.user_id, p.kind, p.body, p.ref_type, p.ref_id, p.visibility, p.created_at,
 		u.username, u.display_name, u.avatar_url
 		FROM posts p JOIN users u ON u.id=p.user_id WHERE p.id=?`, postID).
-		Scan(&id, &uid, &kind, &body, &refType, &refID, &createdAt, &username, &display, &avatar)
+		Scan(&id, &uid, &kind, &body, &refType, &refID, &visibility, &createdAt, &username, &display, &avatar)
 	if err != nil {
 		return nil
+	}
+	// Visibility check: if private, only author and admins can see
+	if visibility == "private" {
+		u := s.loadUser(userID) // fixed: use s.loadUser instead of undefined currentUserFromID
+		if u == nil || (u.ID != uid && !u.IsAdmin) {
+			return nil
+		}
 	}
 	var ref interface{}
 	if depth > 0 && refType.Valid && refID.Valid {
@@ -82,10 +90,11 @@ func (s *Server) postJSON(postID int64, userID int64, depth int) map[string]inte
 		}
 	}
 	return map[string]interface{}{
-		"id":     id,
-		"type":   "post",
-		"kind":   kind,
-		"body":   body.String,
+		"id":         id,
+		"type":       "post",
+		"kind":       kind,
+		"body":       body.String,
+		"visibility": visibility,
 		"author": map[string]interface{}{
 			"id":           uid,
 			"username":     username.String,
@@ -100,7 +109,8 @@ func (s *Server) postJSON(postID int64, userID int64, depth int) map[string]inte
 }
 
 type createPostReq struct {
-	Body string `json:"body"`
+	Body       string `json:"body"`
+	Visibility string `json:"visibility"`
 }
 
 func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +129,15 @@ func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "post is too long (max 5000 chars)")
 		return
 	}
-	res, err := s.db.Exec("INSERT INTO posts (user_id, kind, body) VALUES (?, 'post', ?)", uid, req.Body)
+	vis := req.Visibility
+	if vis == "" || (vis != "public" && vis != "private") {
+		def, _ := s.getSetting("default_post_visibility")
+		if def != "private" {
+			def = "public"
+		}
+		vis = def
+	}
+	res, err := s.db.Exec("INSERT INTO posts (user_id, kind, body, visibility) VALUES (?, 'post', ?, ?)", uid, req.Body, vis)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create post")
 		return
@@ -156,7 +174,15 @@ func (s *Server) handleRepost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid repost target")
 		return
 	}
-	res, err := s.db.Exec("INSERT INTO posts (user_id, kind, ref_type, ref_id) VALUES (?, 'repost', ?, ?)", uid, req.RefType, req.RefID)
+	vis := "public"
+	if req.RefType == "post" {
+		var v string
+		s.db.QueryRow("SELECT visibility FROM posts WHERE id=?", req.RefID).Scan(&v)
+		if v == "private" {
+			vis = "private"
+		}
+	}
+	res, err := s.db.Exec("INSERT INTO posts (user_id, kind, ref_type, ref_id, visibility) VALUES (?, 'repost', ?, ?, ?)", uid, req.RefType, req.RefID, vis)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not repost")
 		return
@@ -181,7 +207,15 @@ func (s *Server) handleQuote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid quote target")
 		return
 	}
-	res, err := s.db.Exec("INSERT INTO posts (user_id, kind, body, ref_type, ref_id) VALUES (?, 'quote', ?, ?, ?)", uid, req.Body, req.RefType, req.RefID)
+	vis := "public"
+	if req.RefType == "post" {
+		var v string
+		s.db.QueryRow("SELECT visibility FROM posts WHERE id=?", req.RefID).Scan(&v)
+		if v == "private" {
+			vis = "private"
+		}
+	}
+	res, err := s.db.Exec("INSERT INTO posts (user_id, kind, body, ref_type, ref_id, visibility) VALUES (?, 'quote', ?, ?, ?, ?)", uid, req.Body, req.RefType, req.RefID, vis)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not quote")
 		return
@@ -194,7 +228,7 @@ func (s *Server) handleGetPost(w http.ResponseWriter, r *http.Request) {
 	uid := currentUserID(r)
 	p := s.postJSON(urlParamInt(r, "id"), uid, 2)
 	if p == nil {
-		writeError(w, http.StatusNotFound, "post not found")
+		writeError(w, http.StatusNotFound, "post not found or private")
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
@@ -231,9 +265,31 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 
 	query := "SELECT id FROM posts"
 	args := []interface{}{}
+	where := []string{}
 	if filter == "following" && uid != 0 {
-		query += " WHERE user_id IN (SELECT following_id FROM follows WHERE follower_id=?) OR user_id=?"
+		where = append(where, "(user_id IN (SELECT following_id FROM follows WHERE follower_id=?) OR user_id=?)")
 		args = append(args, uid, uid)
+	}
+	
+	visCondition := ""
+	if uid != 0 {
+		u := currentUser(r)
+		if u != nil && u.IsAdmin {
+			visCondition = "(1=1)"
+		} else {
+			visCondition = "(visibility='public' OR (visibility='private' AND user_id=?))"
+			args = append(args, uid)
+		}
+	} else {
+		visCondition = "(visibility='public')"
+	}
+	
+	if visCondition != "" {
+		where = append(where, visCondition)
+	}
+
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
 	}
 	query += " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
@@ -289,9 +345,9 @@ func (s *Server) handleListComments(w http.ResponseWriter, r *http.Request) {
 			parentID = parent.Int64
 		}
 		out = append(out, map[string]interface{}{
-			"id":        id,
-			"parent_id": parentID,
-			"body":      body,
+			"id":         id,
+			"parent_id":  parentID,
+			"body":       body,
 			"created_at": createdAt,
 			"author": map[string]interface{}{
 				"id":           cuid,
@@ -456,7 +512,7 @@ func (s *Server) handleShare(w http.ResponseWriter, r *http.Request) {
 	if base == "" {
 		base = "//" + r.Host
 	}
-	shareURL := fmt.Sprintf("%s/#/%s/%d", strings.TrimRight(base, "/"), req.RefType, req.RefID)
+	shareURL := fmt.Sprintf("%s/#/p/%s/%d", strings.TrimRight(base, "/"), req.RefType, req.RefID)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"share_url": shareURL,
 		"counts":    s.counts(req.RefType, req.RefID),

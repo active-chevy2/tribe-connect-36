@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -17,6 +20,8 @@ const (
 	lockoutMinutes   = 15
 	tokenTTL         = 7 * 24 * time.Hour
 )
+
+var regMutex sync.Mutex
 
 func (s *Server) makeToken(userID int64) (string, error) {
 	claims := jwt.MapClaims{
@@ -111,14 +116,18 @@ type registerReq struct {
 	Email       string `json:"email"`
 	Password    string `json:"password"`
 	DisplayName string `json:"display_name"`
+	InviteToken string `json:"invite_token"` // optional
 }
 
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	var count int
 	s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	// Also check if registration is allowed
+	allowReg, _ := s.getSetting("allow_registration")
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"needs_admin": count == 0,
-		"user_count":  count,
+		"needs_admin":          count == 0,
+		"user_count":           count,
+		"allow_registration":   allowReg == "1",
 	})
 }
 
@@ -131,6 +140,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	req.Username = strings.ToLower(strings.TrimSpace(req.Username))
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	req.DisplayName = strings.TrimSpace(req.DisplayName)
+	req.InviteToken = strings.TrimSpace(req.InviteToken)
 	if req.DisplayName == "" {
 		req.DisplayName = req.Username
 	}
@@ -147,6 +157,37 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	regMutex.Lock()
+	defer regMutex.Unlock()
+
+	// Count existing users FIRST to decide if we should bypass the registration-disabled check.
+	var total int
+	s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&total)
+
+	// Check registration allowed (unless invite token provided)
+	allowReg, _ := s.getSetting("allow_registration")
+	// Allow registration if there are no users (this will be the admin account)
+	if total > 0 && allowReg != "1" && req.InviteToken == "" {
+		writeError(w, http.StatusForbidden, "public registration is disabled. Please use an invite link.")
+		return
+	}
+
+	// Validate invite token if provided
+	var inviteID int64
+	if req.InviteToken != "" {
+		var used bool
+		var expiresAt sql.NullTime
+		err := s.db.QueryRow("SELECT id, used, expires_at FROM invites WHERE token=? AND (expires_at IS NULL OR expires_at > NOW())", req.InviteToken).Scan(&inviteID, &used, &expiresAt)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid or expired invite token")
+			return
+		}
+		if used {
+			writeError(w, http.StatusBadRequest, "invite token already used")
+			return
+		}
+	}
+
 	var exists int
 	s.db.QueryRow("SELECT COUNT(*) FROM users WHERE username=? OR email=?", req.Username, req.Email).Scan(&exists)
 	if exists > 0 {
@@ -160,9 +201,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// First registered user becomes the admin.
-	var total int
-	s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&total)
+	// First registered user becomes admin (total was fetched earlier).
 	isAdmin := total == 0
 
 	res, err := s.db.Exec(
@@ -174,8 +213,20 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, _ := res.LastInsertId()
+
+	// Mark invite as used
+	if inviteID > 0 {
+		s.db.Exec("UPDATE invites SET used=1, used_by_user_id=? WHERE id=?", id, inviteID)
+	}
+
 	token, _ := s.makeToken(id)
 	u := s.loadUser(id)
+
+	// Send welcome email if SMTP enabled
+	if enabled, _ := s.getSetting("smtp_enabled"); enabled == "1" {
+		go s.sendWelcomeEmail(u)
+	}
+
 	writeJSON(w, http.StatusCreated, map[string]interface{}{"token": token, "user": u})
 }
 
@@ -232,6 +283,126 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged out"})
+}
+
+// ---- forgot password ----
+
+type forgotReq struct {
+	Email string `json:"email"`
+}
+
+func (s *Server) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
+	var req forgotReq
+	if !decodeJSON(r, &req) {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if email == "" || !strings.Contains(email, "@") {
+		writeError(w, http.StatusBadRequest, "valid email required")
+		return
+	}
+
+	var userID int64
+	err := s.db.QueryRow("SELECT id FROM users WHERE email=?", email).Scan(&userID)
+	if err == sql.ErrNoRows {
+		// Don't reveal if email exists; still return success
+		writeJSON(w, http.StatusOK, map[string]string{"status": "If that email exists, a reset link has been sent."})
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not process request")
+		return
+	}
+
+	// Generate token
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not generate token")
+		return
+	}
+	token := hex.EncodeToString(tokenBytes)
+
+	expiresAt := time.Now().Add(1 * time.Hour)
+	_, err = s.db.Exec("INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)", userID, token, expiresAt)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not save token")
+		return
+	}
+
+	// Send email
+	enabled, _ := s.getSetting("smtp_enabled")
+	if enabled == "1" {
+		go s.sendPasswordResetEmail(email, token)
+	} else {
+		// Fallback: return token in response for testing (but only if not production)
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status": "SMTP disabled, token returned for development",
+			"token":  token,
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "If that email exists, a reset link has been sent."})
+}
+
+type resetReq struct {
+	Token       string `json:"token"`
+	NewPassword string `json:"new_password"`
+}
+
+func (s *Server) handleResetPassword(w http.ResponseWriter, r *http.Request) {
+	var req resetReq
+	if !decodeJSON(r, &req) {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.Token = strings.TrimSpace(req.Token)
+	if req.Token == "" || len(req.NewPassword) < 6 {
+		writeError(w, http.StatusBadRequest, "token and new password (min 6 chars) required")
+		return
+	}
+
+	var userID int64
+	var used bool
+	err := s.db.QueryRow("SELECT user_id, used FROM password_reset_tokens WHERE token=? AND expires_at > NOW()", req.Token).Scan(&userID, &used)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid or expired token")
+		return
+	}
+	if used {
+		writeError(w, http.StatusBadRequest, "token already used")
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not hash password")
+		return
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	_, err = tx.Exec("UPDATE users SET password_hash=? WHERE id=?", string(hash), userID)
+	if err != nil {
+		tx.Rollback()
+		writeError(w, http.StatusInternalServerError, "could not update password")
+		return
+	}
+	_, err = tx.Exec("UPDATE password_reset_tokens SET used=1 WHERE token=?", req.Token)
+	if err != nil {
+		tx.Rollback()
+		writeError(w, http.StatusInternalServerError, "could not mark token")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "password updated"})
 }
 
 // ---- brute force helpers ----

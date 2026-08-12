@@ -103,9 +103,9 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 img { display: block; max-width: 100%; }
 
 /* ============ Layout ============ */
-.shell { display: flex; min-height: 100vh; }
+.shell { display: flex; min-height: 100dvh; }
 .rail {
-  position: sticky; top: 0; height: 100vh; width: var(--rail-w); flex: 0 0 var(--rail-w);
+  position: sticky; top: 0; height: 100dvh; width: var(--rail-w); flex: 0 0 var(--rail-w);
   background: var(--md-surface-container); display: flex; flex-direction: column; align-items: center;
   padding: 18px 0; gap: 8px; z-index: 20;
 }
@@ -135,6 +135,7 @@ img { display: block; max-width: 100%; }
 .topbar h1 { font-family: var(--font-display); font-size: 22px; font-weight: 700; }
 .topbar .sub { color: var(--md-on-surface-variant); font-size: 13px; font-weight: 500; }
 .topbar .grow { flex: 1; }
+.mobile-top-actions { display: none; align-items: center; gap: 4px; margin-left: auto; }
 
 .content { width: 100%; max-width: var(--content-max); margin: 0 auto; padding: 20px 20px 120px; }
 .wide .content { max-width: 1000px; }
@@ -341,6 +342,7 @@ img { display: block; max-width: 100%; }
 /* ============ Responsive ============ */
 @media (max-width: 720px) {
   .rail { display: none; }
+  .mobile-top-actions { display: flex; }
   .content { padding: 16px 14px 96px; }
   .navbar {
     display: flex; position: fixed; bottom: 0; left: 0; right: 0; z-index: 30; height: 72px;
