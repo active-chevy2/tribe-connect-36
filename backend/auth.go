@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
-	"crypto/rand"
-	"encoding/hex"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -19,6 +20,8 @@ const (
 	lockoutMinutes   = 15
 	tokenTTL         = 7 * 24 * time.Hour
 )
+
+var regMutex sync.Mutex
 
 func (s *Server) makeToken(userID int64) (string, error) {
 	claims := jwt.MapClaims{
@@ -153,6 +156,9 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "password must be at least 6 characters")
 		return
 	}
+
+	regMutex.Lock()
+	defer regMutex.Unlock()
 
 	// Count existing users FIRST to decide if we should bypass the registration-disabled check.
 	var total int
