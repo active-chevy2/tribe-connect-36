@@ -43,7 +43,12 @@ function sanitize(html) {
     [...el.attributes].forEach(a => {
       const n = a.name.toLowerCase();
       if (n.startsWith('on')) el.removeAttribute(a.name);
-      if ((n === 'href' || n === 'src') && /^\s*javascript:/i.test(a.value)) el.removeAttribute(a.name);
+      if (n === 'href' || n === 'src') {
+        const val = a.value.trim().toLowerCase();
+        if (val.startsWith('javascript:') || val.startsWith('data:') || val.startsWith('vbscript:')) {
+          el.removeAttribute(a.name);
+        }
+      }
     });
     if (el.tagName === 'A') { el.setAttribute('target', '_blank'); el.setAttribute('rel', 'noopener noreferrer'); }
   });
