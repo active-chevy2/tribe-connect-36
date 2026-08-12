@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mmcdole/gofeed"
@@ -202,11 +203,23 @@ func (s *Server) refreshAllFeeds() {
 		feeds = append(feeds, x)
 	}
 	rows.Close()
+
+	// Implement bounded concurrency (max 5 simultaneous fetches)
+	sem := make(chan struct{}, 5)
+	var wg sync.WaitGroup
+
 	for _, x := range feeds {
-		if err := s.fetchAndStoreFeed(x.id, x.url); err != nil {
-			log.Printf("feed refresh error [%s]: %v", x.url, err)
-		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(feedID int64, feedURL string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if err := s.fetchAndStoreFeed(feedID, feedURL); err != nil {
+				log.Printf("feed refresh error [%s]: %v", feedURL, err)
+			}
+		}(x.id, x.url)
 	}
+	wg.Wait()
 }
 
 func (s *Server) feedWorker() {
