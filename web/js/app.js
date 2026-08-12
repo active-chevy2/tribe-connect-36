@@ -5,6 +5,7 @@ if (state.theme) document.documentElement.setAttribute('data-theme', state.theme
 
 // ======== Scroll preservation ========
 const scrollCache = {};
+let previousRouteKey = ''; // will be set after first render
 
 function getRouteKey() {
   const hash = location.hash || '#/';
@@ -37,19 +38,35 @@ async function boot() {
   if (API.token) {
     try { state.user = await API.me(); } catch (_) { API.setToken(null); }
   }
-  // Save scroll before hash change
-  window.addEventListener('hashchange', () => {
-    const oldKey = getRouteKey();
+  // Single hashchange listener: save old route scroll, render new route, update previousRouteKey
+  window.addEventListener('hashchange', async () => {
+    const oldKey = previousRouteKey;
     saveScroll(oldKey);
+    await render();
+    previousRouteKey = getRouteKey();
   });
-  window.addEventListener('hashchange', render);
+  // Initial render
+  await render();
+  previousRouteKey = getRouteKey();
+  // Global click handler
   document.addEventListener('click', onGlobalAction);
-  render();
 }
 
 function go(hash) {
-  if (location.hash === hash) render();
-  else location.hash = hash;
+  if (location.hash === hash) {
+    // Same route – re‑render without changing hash
+    // Save current scroll for this route, then render and restore (optional)
+    const key = getRouteKey();
+    saveScroll(key);
+    render().then(() => {
+      // We don't restore here because the view itself may restore if needed.
+      // For same‑route re‑renders (e.g., filter change), the pagination
+      // logic will restore the scroll after loading new content.
+      // This keeps the behaviour consistent with the original design.
+    });
+  } else {
+    location.hash = hash;
+  }
 }
 
 /* ---------------- router ---------------- */
@@ -376,7 +393,7 @@ function itemCard(it) {
 /* ---------------- views ---------------- */
 async function viewHome() {
   const filter = state.user ? (window._homeFilter || 'all') : 'all';
-  // Save current scroll before re-rendering
+  // Save current scroll before re-rendering (for same-route filter changes)
   saveScroll(getRouteKey());
   const v = shell('home', `<div><h1>Home</h1><div class="sub">Your social timeline</div></div>`);
   
@@ -428,7 +445,6 @@ async function viewHome() {
 
 async function viewExplore() {
   const filter = state.user ? (window._exFilter || 'all') : 'all';
-  // Save current scroll before re-rendering
   saveScroll(getRouteKey());
   const topAction = state.user ? `<button class="btn btn-tonal btn-sm" data-act="manage-feeds" data-testid="manage-feeds-btn"><span class="material-symbols-rounded">tune</span>Manage feeds</button>` : '';
   const v = shell('explore', `<div><h1>Explore</h1><div class="sub">Latest from every feed</div></div><div class="grow"></div>${topAction}`);
@@ -536,7 +552,7 @@ async function viewProfile(username) {
 }
 
 async function viewDetail(tt, id) {
-  saveScroll(getRouteKey());
+  // No need to save scroll here because the hashchange listener already saved the previous route's scroll.
   const v = shell(tt === 'feed_item' ? 'explore' : 'home',
     `<button class="icon-btn back-btn" data-act="back" data-testid="back-btn"><span class="material-symbols-rounded">arrow_back</span></button>
      <div><h1>${tt === 'feed_item' ? 'Article' : 'Post'}</h1></div>`);
@@ -602,7 +618,7 @@ async function viewDetail(tt, id) {
   }
   
   loadComments(tt, id, v.querySelector('#comments'), v);
-  // Restore scroll after detail is rendered
+  // Restore scroll for this detail view if it was previously saved (e.g., returning via back)
   restoreScroll(getRouteKey());
 }
 
@@ -658,7 +674,7 @@ async function paginate(container, cardFn, fetchFn, emptyMsg, emptyIcon) {
     more.disabled = false;
     more.style.display = data.length < 20 ? 'none' : 'block';
     page++;
-    // Restore scroll after first page loads
+    // Restore scroll after first page loads (for initial render or re-render)
     if (page === 2) {
       restoreScroll(routeKey);
     }
