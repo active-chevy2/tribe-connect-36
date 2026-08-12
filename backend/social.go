@@ -270,19 +270,24 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 		where = append(where, "(user_id IN (SELECT following_id FROM follows WHERE follower_id=?) OR user_id=?)")
 		args = append(args, uid, uid)
 	}
-	visCondition := "(visibility='public'"
+	
+	visCondition := ""
 	if uid != 0 {
-		visCondition += " OR (visibility='private' AND user_id=?)"
-		args = append(args, uid)
 		u := currentUser(r)
 		if u != nil && u.IsAdmin {
-			visCondition = "1=1"
+			visCondition = "(1=1)"
+		} else {
+			visCondition = "(visibility='public' OR (visibility='private' AND user_id=?))"
+			args = append(args, uid)
 		}
+	} else {
+		visCondition = "(visibility='public')"
 	}
-	visCondition += ")"
-	if visCondition != "1=1" {
+	
+	if visCondition != "" {
 		where = append(where, visCondition)
 	}
+
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
