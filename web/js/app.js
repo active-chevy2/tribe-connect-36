@@ -84,7 +84,14 @@ function shell(active, topbarHTML, opts) {
         <button class="icon-btn" data-act="logout" title="Log out" data-testid="logout-btn"><span class="material-symbols-rounded">logout</span></button>
       </nav>
       <div class="main">
-        <header class="topbar">${topbarHTML}</header>
+        <header class="topbar">
+          ${topbarHTML}
+          <div class="mobile-top-actions">
+            ${state.user.is_admin ? `<button class="icon-btn" data-act="admin-settings" title="Admin"><span class="material-symbols-rounded">settings</span></button>` : ''}
+            <button class="icon-btn" data-act="toggle-theme" title="Toggle theme"><span class="material-symbols-rounded">dark_mode</span></button>
+            <button class="icon-btn" data-act="logout" title="Log out"><span class="material-symbols-rounded">logout</span></button>
+          </div>
+        </header>
         <div class="content" id="view"></div>
       </div>
     </div>
