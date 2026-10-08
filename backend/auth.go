@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -122,12 +123,18 @@ type registerReq struct {
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	var count int
 	s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
-	// Also check if registration is allowed
+
 	allowReg, _ := s.getSetting("allow_registration")
+	defVis, _ := s.getSetting("default_post_visibility")
+	if defVis != "private" {
+		defVis = "public"
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"needs_admin":          count == 0,
-		"user_count":           count,
-		"allow_registration":   allowReg == "1",
+		"needs_admin":             count == 0,
+		"user_count":              count,
+		"allow_registration":      allowReg == "1",
+		"default_post_visibility": defVis,
 	})
 }
 
@@ -160,19 +167,15 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	regMutex.Lock()
 	defer regMutex.Unlock()
 
-	// Count existing users FIRST to decide if we should bypass the registration-disabled check.
 	var total int
 	s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&total)
 
-	// Check registration allowed (unless invite token provided)
 	allowReg, _ := s.getSetting("allow_registration")
-	// Allow registration if there are no users (this will be the admin account)
 	if total > 0 && allowReg != "1" && req.InviteToken == "" {
 		writeError(w, http.StatusForbidden, "public registration is disabled. Please use an invite link.")
 		return
 	}
 
-	// Validate invite token if provided
 	var inviteID int64
 	if req.InviteToken != "" {
 		var used bool
@@ -201,7 +204,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// First registered user becomes admin (total was fetched earlier).
+	// First registered user becomes admin.
 	isAdmin := total == 0
 
 	res, err := s.db.Exec(
@@ -209,12 +212,17 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		req.Username, req.Email, string(hash), req.DisplayName, isAdmin,
 	)
 	if err != nil {
+		// Unique violation is the real defence against the TOCTOU race between
+		// the count above and this insert across processes / replicas.
+		if strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+			writeError(w, http.StatusConflict, "username or email already taken")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "could not create user")
 		return
 	}
 	id, _ := res.LastInsertId()
 
-	// Mark invite as used
 	if inviteID > 0 {
 		s.db.Exec("UPDATE invites SET used=1, used_by_user_id=? WHERE id=?", id, inviteID)
 	}
@@ -222,7 +230,6 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	token, _ := s.makeToken(id)
 	u := s.loadUser(id)
 
-	// Send welcome email if SMTP enabled
 	if enabled, _ := s.getSetting("smtp_enabled"); enabled == "1" {
 		go s.sendWelcomeEmail(u)
 	}
@@ -291,6 +298,9 @@ type forgotReq struct {
 	Email string `json:"email"`
 }
 
+// handleForgotPassword ALWAYS returns the same generic response, regardless of
+// whether the email exists or whether SMTP is enabled. This prevents both
+// account-enumeration and (previously) full account takeover when SMTP was off.
 func (s *Server) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
 	var req forgotReq
 	if !decodeJSON(r, &req) {
@@ -303,18 +313,20 @@ func (s *Server) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	generic := map[string]string{"status": "If that email exists, a reset link has been sent."}
+
 	var userID int64
 	err := s.db.QueryRow("SELECT id FROM users WHERE email=?", email).Scan(&userID)
 	if err == sql.ErrNoRows {
-		// Don't reveal if email exists; still return success
-		writeJSON(w, http.StatusOK, map[string]string{"status": "If that email exists, a reset link has been sent."})
+		// Do not reveal whether the email exists.
+		writeJSON(w, http.StatusOK, generic)
 		return
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not process request")
 		return
 	}
 
-	// Generate token
+	// Generate token.
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not generate token")
@@ -323,26 +335,26 @@ func (s *Server) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
 	token := hex.EncodeToString(tokenBytes)
 
 	expiresAt := time.Now().Add(1 * time.Hour)
-	_, err = s.db.Exec("INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)", userID, token, expiresAt)
-	if err != nil {
+	if _, err = s.db.Exec(
+		"INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)",
+		userID, token, expiresAt,
+	); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not save token")
 		return
 	}
 
-	// Send email
 	enabled, _ := s.getSetting("smtp_enabled")
 	if enabled == "1" {
 		go s.sendPasswordResetEmail(email, token)
 	} else {
-		// Fallback: return token in response for testing (but only if not production)
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"status": "SMTP disabled, token returned for development",
-			"token":  token,
-		})
-		return
+		// SECURITY: never return the reset token over HTTP. Log it server-side
+		// so an operator with log access can retrieve it while SMTP is not yet
+		// configured. Rotate the log or set up SMTP before going live.
+		log.Printf("[password-reset] SMTP disabled — reset token for %s: %s (expires %s UTC)",
+			email, token, expiresAt.UTC().Format(time.RFC3339))
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "If that email exists, a reset link has been sent."})
+	writeJSON(w, http.StatusOK, generic)
 }
 
 type resetReq struct {
@@ -385,14 +397,12 @@ func (s *Server) handleResetPassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "database error")
 		return
 	}
-	_, err = tx.Exec("UPDATE users SET password_hash=? WHERE id=?", string(hash), userID)
-	if err != nil {
+	if _, err = tx.Exec("UPDATE users SET password_hash=? WHERE id=?", string(hash), userID); err != nil {
 		tx.Rollback()
 		writeError(w, http.StatusInternalServerError, "could not update password")
 		return
 	}
-	_, err = tx.Exec("UPDATE password_reset_tokens SET used=1 WHERE token=?", req.Token)
-	if err != nil {
+	if _, err = tx.Exec("UPDATE password_reset_tokens SET used=1 WHERE token=?", req.Token); err != nil {
 		tx.Rollback()
 		writeError(w, http.StatusInternalServerError, "could not mark token")
 		return
