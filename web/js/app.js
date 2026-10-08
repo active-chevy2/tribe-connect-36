@@ -5,7 +5,7 @@ if (state.theme) document.documentElement.setAttribute('data-theme', state.theme
 
 // ======== Scroll preservation ========
 const scrollCache = {};
-let previousRouteKey = ''; // will be set after first render
+let previousRouteKey = '';
 
 function getRouteKey() {
   const hash = location.hash || '#/';
@@ -39,32 +39,22 @@ async function boot() {
   if (API.token) {
     try { state.user = await API.me(); } catch (_) { API.setToken(null); }
   }
-  // Single hashchange listener: save old route scroll, render new route, update previousRouteKey
   window.addEventListener('hashchange', async () => {
     const oldKey = previousRouteKey;
     saveScroll(oldKey);
     await render();
     previousRouteKey = getRouteKey();
   });
-  // Initial render
   await render();
   previousRouteKey = getRouteKey();
-  // Global click handler
   document.addEventListener('click', onGlobalAction);
 }
 
 function go(hash) {
   if (location.hash === hash) {
-    // Same route – re‑render without changing hash
-    // Save current scroll for this route, then render and restore (optional)
     const key = getRouteKey();
     saveScroll(key);
-    render().then(() => {
-      // We don't restore here because the view itself may restore if needed.
-      // For same‑route re‑renders (e.g., filter change), the pagination
-      // logic will restore the scroll after loading new content.
-      // This keeps the behaviour consistent with the original design.
-    });
+    render();
   } else {
     location.hash = hash;
   }
@@ -73,10 +63,9 @@ function go(hash) {
 /* ---------------- router ---------------- */
 async function render() {
   const hash = location.hash || '#/';
-  const parts = hash.slice(2).split('/'); // drop "#/"
+  const parts = hash.slice(2).split('/');
   const [seg, arg, arg2] = parts;
 
-  // Define routes that can be accessed without logging in
   const publicRoutes = ['', 'explore', 'people', 'profile', 'post', 'feed_item', 'p', 'about', 'login', 'register', 'forgot-password', 'reset-password'];
 
   if (!state.user && !publicRoutes.includes(seg)) {
@@ -85,21 +74,20 @@ async function render() {
 
   try {
     if (seg === 'login') { state.authMode = 'login'; renderAuth(); return; }
-    if (seg === 'register') { 
-      state.authMode = 'register'; 
+    if (seg === 'register') {
+      state.authMode = 'register';
       const params = new URLSearchParams(location.hash.split('?')[1] || '');
       const invite = params.get('invite');
-      renderAuth(invite); return; 
+      renderAuth(invite); return;
     }
-    if (seg === 'p' && arg === 'post') return viewPublicPost(arg2);
+    if (seg === 'p' && (arg === 'post' || arg === 'feed_item') && arg2) return viewPublicPost(arg, arg2);
     if (seg === 'forgot-password') return renderForgotPassword();
     if (seg === 'reset-password') {
       const params = new URLSearchParams(location.hash.split('?')[1] || '');
       const token = params.get('token');
       renderResetPassword(token); return;
     }
-    
-    // Require auth for admin routes
+
     if (!state.user && seg === 'admin') {
       renderAuth(); return;
     }
@@ -141,7 +129,7 @@ async function loadBrand() {
   try {
     const m = await fetch('/manifest.json', { cache: 'no-store' }).then(r => r.json());
     let icon = (m.icons && m.icons[0] && m.icons[0].src) || '';
-    if (icon === '/logo192.png') icon = ''; // placeholder default -> use letter logo
+    if (icon === '/logo192.png') icon = '';
     state.brand = {
       name: m.name || 'Conflux',
       short_name: m.short_name || m.name || 'Conflux',
@@ -221,7 +209,7 @@ function emptyHTML(msg, icon) {
 }
 function spinnerHTML() { return '<div class="spinner"></div>'; }
 
-/* ---------------- about this instance ---------------- */
+/* ---------------- about ---------------- */
 async function viewAbout() {
   const v = shell('about', `<div><h1>About</h1><div class="sub">About this instance</div></div>`);
   v.innerHTML = spinnerHTML();
@@ -260,7 +248,6 @@ async function viewAbout() {
       </div>
     </div>`;
 }
-
 
 /* ---------------- auth ---------------- */
 async function renderAuth(inviteToken) {
@@ -415,7 +402,6 @@ function embedHTML(ref) {
         <div class="embed-sum">${esc(stripTags(ref.summary))}</div>
       </div></div>`;
   }
-  // post
   return `<div class="embed clickable" data-act="open" data-href="#/post/${ref.id}">
     <div class="embed-pad">
       <div class="post-head" style="margin-bottom:6px">${avatarHTML(ref.author, true)}
@@ -477,10 +463,9 @@ function itemCard(it) {
 /* ---------------- views ---------------- */
 async function viewHome() {
   const filter = state.user ? (window._homeFilter || 'all') : 'all';
-  // Save current scroll before re-rendering (for same-route filter changes)
   saveScroll(getRouteKey());
   const v = shell('home', `<div><h1>Home</h1><div class="sub">Your social timeline</div></div>`);
-  
+
   let composerHTML = '';
   let tabsHTML = '';
 
@@ -517,7 +502,7 @@ async function viewHome() {
   }
 
   v.innerHTML = composerHTML + tabsHTML + `<div id="feed"></div>`;
-  
+
   if (state.user) {
     const ta = v.querySelector('#home-composer');
     ta.addEventListener('input', () => v.querySelector('#home-count').textContent = ta.value.length + ' / 5000');
@@ -537,10 +522,10 @@ async function viewExplore() {
   saveScroll(getRouteKey());
   const topAction = state.user ? `<button class="btn btn-tonal btn-sm" data-act="manage-feeds" data-testid="manage-feeds-btn"><span class="material-symbols-rounded">tune</span>Manage feeds</button>` : '';
   const v = shell('explore', `<div><h1>Explore</h1><div class="sub">Latest from every feed</div></div><div class="grow"></div>${topAction}`);
-  
+
   let addFeedHTML = '';
   let tabsHTML = '';
-  
+
   if (state.user) {
     addFeedHTML = `
       <div class="addfeed">
@@ -555,7 +540,7 @@ async function viewExplore() {
   }
 
   v.innerHTML = addFeedHTML + tabsHTML + `<div id="feed"></div>`;
-  
+
   if (state.user) {
     const input = v.querySelector('#feed-url');
     const addBtn = v.querySelector('#add-feed');
@@ -608,7 +593,7 @@ async function viewProfile(username) {
   let p;
   try { p = await API.profile(username); } catch (e) { v.innerHTML = emptyHTML('User not found', 'person_off'); return; }
   const profileLinkHtml = p.profile_link ? `<div><a href="${esc(p.profile_link)}" target="_blank" rel="noopener" class="handle" style="font-size:14px">${esc(p.profile_link_title || p.profile_link)}</a></div>` : '';
-  
+
   let actionBtn = '';
   if (state.user) {
     actionBtn = p.is_self
@@ -633,7 +618,7 @@ async function viewProfile(username) {
         <div><b>${p.follower_count}</b> <span>Followers</span></div>
         <div><b>${p.following_count}</b> <span>Following</span></div>
       </div>
-      <div style="margin-top:12px"><a href="/api/users/${username}/feed" target="_blank" rel="noopener" class="btn btn-text btn-sm" style="padding-left:0"><span class="material-symbols-rounded">rss_feed</span> RSS feed</a></div>
+      <div style="margin-top:12px"><a href="/api/users/${esc(username)}/feed" target="_blank" rel="noopener" class="btn btn-text btn-sm" style="padding-left:0"><span class="material-symbols-rounded">rss_feed</span> RSS feed</a></div>
     </div>
     <div class="section-title">Posts</div>
     <div id="uposts"></div>`;
@@ -641,7 +626,6 @@ async function viewProfile(username) {
 }
 
 async function viewDetail(tt, id) {
-  // No need to save scroll here because the hashchange listener already saved the previous route's scroll.
   const v = shell(tt === 'feed_item' ? 'explore' : 'home',
     `<button class="icon-btn back-btn" data-act="back" data-testid="back-btn"><span class="material-symbols-rounded">arrow_back</span></button>
      <div><h1>${tt === 'feed_item' ? 'Article' : 'Post'}</h1></div>`);
@@ -705,9 +689,8 @@ async function viewDetail(tt, id) {
   } else {
     v._setReply = () => { toast('Please log in to reply'); go('#/login'); };
   }
-  
+
   loadComments(tt, id, v.querySelector('#comments'), v);
-  // Restore scroll for this detail view if it was previously saved (e.g., returning via back)
   restoreScroll(getRouteKey());
 }
 
@@ -763,10 +746,7 @@ async function paginate(container, cardFn, fetchFn, emptyMsg, emptyIcon) {
     more.disabled = false;
     more.style.display = data.length < 20 ? 'none' : 'block';
     page++;
-    // Restore scroll after first page loads (for initial render or re-render)
-    if (page === 2) {
-      restoreScroll(routeKey);
-    }
+    if (page === 2) restoreScroll(routeKey);
   }
   more.addEventListener('click', load);
   await load();
@@ -838,7 +818,6 @@ async function viewAdminSettings() {
     } catch (e) { toast(e.message); }
   });
 
-  // Live theme-color preview (text <-> color input sync)
   const tText = document.getElementById('app_theme_color');
   const tPick = document.getElementById('app_theme_color_picker');
   if (tText && tPick) {
@@ -870,9 +849,9 @@ async function viewAdminInvites() {
   let listHtml = invites.map(inv => `
     <div class="list-row" data-testid="invite-row-${inv.id}">
       <div class="grow">
-        <div class="title">${inv.token}</div>
-        <div class="desc">Created by ${inv.creator_name} · ${inv.used ? 'Used' : 'Active'} · expires ${inv.expires_at ? new Date(inv.expires_at).toLocaleDateString() : 'never'}</div>
-        <div><a href="${inv.link}" target="_blank">${inv.link}</a></div>
+        <div class="title">${esc(inv.token)}</div>
+        <div class="desc">Created by ${esc(inv.creator_name)} · ${inv.used ? 'Used' : 'Active'} · expires ${inv.expires_at ? new Date(inv.expires_at).toLocaleDateString() : 'never'}</div>
+        <div><a href="${esc(inv.link)}" target="_blank">${esc(inv.link)}</a></div>
       </div>
       ${!inv.used ? `<button class="btn btn-tonal btn-sm" data-act="revoke-invite" data-invite-id="${inv.id}" data-testid="revoke-${inv.id}">Revoke</button>` : ''}
     </div>`).join('');
@@ -882,7 +861,7 @@ async function viewAdminInvites() {
   `;
   document.getElementById('create-invite').addEventListener('click', async () => {
     try {
-      const res = await API.createInvite();
+      await API.createInvite();
       toast('Invite created!');
       render();
     } catch (e) { toast(e.message); }
@@ -897,27 +876,33 @@ async function viewAdminInvites() {
   });
 }
 
-/* ---------------- Public post view (no auth) ---------------- */
-async function viewPublicPost(id) {
+/* ---------------- Public post / item view (no auth) ---------------- */
+async function viewPublicPost(tt, id) {
   const app = document.getElementById('app');
   app.className = '';
-  let post;
+  let body = '';
   try {
-    const tokenBackup = API.token;
-    API.token = null;
-    post = await API.post_(id);
-    API.token = tokenBackup;
+    if (tt === 'feed_item') {
+      const obj = await API.item(id);
+      body = `<div class="card">
+        <div class="kind-chip"><span class="material-symbols-rounded">rss_feed</span>${esc(obj.feed_title || 'Feed')}</div>
+        <div class="item-title" style="cursor:default">${esc(obj.title || 'Untitled')}</div>
+        ${obj.image_url ? `<img class="item-thumb" src="${esc(obj.image_url)}" alt="" onerror="this.remove()"/>` : ''}
+        ${obj.link ? `<a class="btn btn-text btn-sm" href="${esc(obj.link)}" target="_blank" rel="noopener"><span class="material-symbols-rounded">open_in_new</span>Read original</a>` : ''}
+        <div class="article-content">${sanitize(obj.content || obj.summary)}</div>
+      </div>`;
+    } else {
+      const post = await API.post_(id);
+      body = postCard(post);
+    }
   } catch (e) {
-    app.innerHTML = `<div class="auth-wrap"><div class="auth-card"><div class="empty"><span class="material-symbols-rounded">lock</span><div>This post is private or not found.</div></div></div></div>`;
-    return;
+    body = `<div class="empty"><span class="material-symbols-rounded">lock</span><div>This content is private or not found.</div></div>`;
   }
   app.innerHTML = `
     <div class="auth-wrap" style="background:var(--md-background);padding:20px">
       <div class="auth-card" style="max-width:600px">
         ${authBrandHTML('28px')}
-        <div style="margin-top:20px">
-          ${postCard(post)}
-        </div>
+        <div style="margin-top:20px">${body}</div>
         <div style="margin-top:20px;text-align:center"><a href="#/" class="btn btn-text">Back to app</a></div>
       </div>
     </div>`;
@@ -929,14 +914,13 @@ async function onGlobalAction(e) {
   if (!el) return;
   const act = el.dataset.act;
 
-  // Intercept actions that require an authenticated user
   const authRequired = [
-    'compose', 'manage-feeds', 'edit-profile', 'follow', 'unfollow', 
-    'delete-post', 'like-comment', 'reply-comment', 'delete-comment', 
-    'sub-feed', 'unsub-feed', 'refresh-feed', 'delete-feed', 
+    'compose', 'manage-feeds', 'edit-profile', 'follow', 'unfollow',
+    'delete-post', 'like-comment', 'reply-comment', 'delete-comment',
+    'sub-feed', 'unsub-feed', 'refresh-feed', 'delete-feed',
     'react', 'repost', 'quote', 'comment'
   ];
-  
+
   if (!state.user && authRequired.includes(act)) {
     toast('Please log in to interact');
     go('#/login');
@@ -965,7 +949,6 @@ async function onGlobalAction(e) {
   if (act === 'home-filter') { window._homeFilter = el.dataset.f; viewHome(); return; }
   if (act === 'ex-filter') { window._exFilter = el.dataset.f; viewExplore(); return; }
 
-  // social actions on cards
   if (['react', 'comment', 'repost', 'quote', 'share'].includes(act)) {
     const bar = el.closest('.actions');
     const tt = bar.dataset.tt, id = Number(bar.dataset.id), my = bar.dataset.my;
@@ -1001,7 +984,6 @@ async function onGlobalAction(e) {
     });
     return;
   }
-  // feed management (inside dialog)
   if (act === 'sub-feed') { await API.subscribe(Number(el.dataset.fid)); refreshFeedsDialog(); return; }
   if (act === 'unsub-feed') { await API.unsubscribe(Number(el.dataset.fid)); refreshFeedsDialog(); return; }
   if (act === 'refresh-feed') { toast('Refreshing…'); try { await API.refreshFeed(Number(el.dataset.fid)); toast('Feed refreshed'); refreshFeedsDialog(); } catch (err) { toast(err.message); } return; }
@@ -1032,7 +1014,7 @@ async function cardAction(act, tt, id, my, btn) {
       return;
     }
     try {
-      const res = await API.share(tt, id);
+      await API.share(tt, id);
       const url = location.origin + '/#/p/' + tt + '/' + id;
       if (navigator.clipboard) { await navigator.clipboard.writeText(url); toast('Link copied to clipboard'); }
       else toast('Share link: ' + url);
@@ -1168,8 +1150,6 @@ function effectiveDark() {
   return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
 }
 
-// Generate a cohesive MD3-like accent palette from a single seed hex and
-// apply it to the primary + secondary token families (light & dark aware).
 function applyThemeColor(hex) {
   const root = document.documentElement;
   const clear = () => THEME_VARS.forEach(v => root.style.removeProperty(v));
@@ -1211,8 +1191,8 @@ function toggleTheme() {
 /* ---------------- helpers ---------------- */
 async function getDefaultVisibility() {
   try {
-    const settings = await API.getSettings();
-    return settings.default_post_visibility || 'public';
+    const b = await API.bootstrap();
+    return b.default_post_visibility || 'public';
   } catch { return 'public'; }
 }
 
