@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -41,10 +42,19 @@ func loadConfig() Config {
 		refresh = 15
 	}
 
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		secret = "dev-insecure-secret-change-me"
+		log.Printf("WARNING: JWT_SECRET is not set — using an insecure development default. " +
+			"Set JWT_SECRET to a long random value before running in production.")
+	} else if len(secret) < 32 {
+		log.Printf("WARNING: JWT_SECRET is shorter than 32 characters; consider a longer value.")
+	}
+
 	return Config{
 		Port:           getenv("PORT", "8080"),
 		DSN:            dsn,
-		JWTSecret:      []byte(getenv("JWT_SECRET", "dev-insecure-secret-change-me")),
+		JWTSecret:      []byte(secret),
 		WebDir:         getenv("WEB_DIR", "./web"),
 		FeedWorker:     strings.ToLower(getenv("FEED_WORKER", "on")) != "off",
 		RefreshMinutes: refresh,
