@@ -19,6 +19,20 @@ import (
 
 var imgRe = regexp.MustCompile(`(?i)<img[^>]+src=["']([^"']+)["']`)
 
+// isHTTPURL reports whether s is a well-formed absolute http(s) URL.
+// Used to reject javascript:, data:, file: etc. coming from untrusted feeds
+// before they are stored and later rendered as <a href> / <img src>.
+func isHTTPURL(s string) bool {
+	if s == "" {
+		return false
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return false
+	}
+	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
 func extractImage(item *gofeed.Item) string {
 	if item.Image != nil && item.Image.URL != "" {
 		return item.Image.URL
@@ -144,7 +158,7 @@ func (s *Server) fetchAndStoreFeed(feedID int64, feedURL string) error {
 	}
 
 	image := ""
-	if feed.Image != nil {
+	if feed.Image != nil && isHTTPURL(feed.Image.URL) {
 		image = feed.Image.URL
 	}
 	s.db.Exec("UPDATE feeds SET title=?, site_url=?, description=?, image_url=?, last_fetched_at=?, fetch_error=NULL WHERE id=?",
@@ -178,11 +192,22 @@ func (s *Server) fetchAndStoreFeed(feedID int64, feedURL string) error {
 		if content == "" {
 			content = item.Description
 		}
+
+		// Scheme-validate untrusted URLs before storing them.
+		link := trimTo(item.Link, 1000)
+		if !isHTTPURL(link) {
+			link = ""
+		}
+		img := trimTo(extractImage(item), 1000)
+		if !isHTTPURL(img) {
+			img = ""
+		}
+
 		s.db.Exec(`INSERT INTO feed_items (feed_id, guid, title, link, author, summary, content, image_url, published_at)
 			VALUES (?,?,?,?,?,?,?,?,?)
 			ON DUPLICATE KEY UPDATE title=VALUES(title), link=VALUES(link), summary=VALUES(summary), content=VALUES(content), image_url=VALUES(image_url)`,
-			feedID, trimTo(guid, 500), item.Title, trimTo(item.Link, 1000), trimTo(author, 255),
-			summary, content, trimTo(extractImage(item), 1000), published)
+			feedID, trimTo(guid, 500), item.Title, link, trimTo(author, 255),
+			summary, content, img, published)
 	}
 	return nil
 }
@@ -204,7 +229,6 @@ func (s *Server) refreshAllFeeds() {
 	}
 	rows.Close()
 
-	// Implement bounded concurrency (max 5 simultaneous fetches)
 	sem := make(chan struct{}, 5)
 	var wg sync.WaitGroup
 
@@ -236,12 +260,12 @@ func (s *Server) feedWorker() {
 
 func (s *Server) feedJSON(feedID int64, userID int64) map[string]interface{} {
 	var (
-		id             int64
-		feedURL        string
-		title, site    sql.NullString
+		id              int64
+		feedURL         string
+		title, site     sql.NullString
 		desc, img, ferr sql.NullString
-		last           sql.NullTime
-		createdAt      time.Time
+		last            sql.NullTime
+		createdAt       time.Time
 	)
 	err := s.db.QueryRow(`SELECT id, feed_url, title, site_url, description, image_url, fetch_error, last_fetched_at, created_at
 		FROM feeds WHERE id=?`, feedID).Scan(&id, &feedURL, &title, &site, &desc, &img, &ferr, &last, &createdAt)
@@ -262,18 +286,18 @@ func (s *Server) feedJSON(feedID int64, userID int64) map[string]interface{} {
 		lastFetched = last.Time
 	}
 	return map[string]interface{}{
-		"id":              id,
-		"feed_url":        feedURL,
-		"title":           title.String,
-		"site_url":        site.String,
-		"description":     desc.String,
-		"image_url":       img.String,
-		"fetch_error":     ferr.String,
-		"last_fetched_at": lastFetched,
-		"created_at":      createdAt,
-		"item_count":      itemCount,
+		"id":               id,
+		"feed_url":         feedURL,
+		"title":            title.String,
+		"site_url":         site.String,
+		"description":      desc.String,
+		"image_url":        img.String,
+		"fetch_error":      ferr.String,
+		"last_fetched_at":  lastFetched,
+		"created_at":       createdAt,
+		"item_count":       itemCount,
 		"subscriber_count": subCount,
-		"subscribed":      subscribed,
+		"subscribed":       subscribed,
 	}
 }
 
@@ -308,7 +332,7 @@ func (s *Server) handleAddFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.FeedURL = strings.TrimSpace(req.FeedURL)
-	if req.FeedURL == "" || !strings.HasPrefix(req.FeedURL, "http") {
+	if req.FeedURL == "" || !isHTTPURL(req.FeedURL) {
 		writeError(w, http.StatusBadRequest, "a valid feed URL (http/https) is required")
 		return
 	}
