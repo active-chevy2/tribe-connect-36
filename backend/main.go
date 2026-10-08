@@ -26,7 +26,7 @@ func cors(next http.Handler) http.Handler {
 func spaHandler(webDir string) http.HandlerFunc {
 	index := filepath.Join(webDir, "index.html")
 	return func(w http.ResponseWriter, r *http.Request) {
-		clean := filepath.Clean(r.URL.Path)
+		clean := filepath.Clean("/" + r.URL.Path) // leading "/" prevents escaping webDir
 		p := filepath.Join(webDir, clean)
 		if info, err := os.Stat(p); err == nil && !info.IsDir() {
 			http.ServeFile(w, r, p)
@@ -46,6 +46,13 @@ func (s *Server) routes() http.Handler {
 
 	r.Route("/api", func(api chi.Router) {
 		api.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
+			if err := s.db.Ping(); err != nil {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+					"status": "unavailable",
+					"error":  err.Error(),
+				})
+				return
+			}
 			writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		})
 
@@ -107,9 +114,9 @@ func (s *Server) routes() http.Handler {
 			pr.Delete("/invites/{id}", s.handleRevokeInvite)
 
 			// Admin endpoints
-			pr.Get("/settings", s.handleGetSettings)   // only admin
-			pr.Put("/settings", s.handleUpdateSettings) // only admin
-			pr.Put("/admin/posts/{id}", s.handleAdminUpdatePost) // admin override visibility
+			pr.Get("/settings", s.handleGetSettings)
+			pr.Put("/settings", s.handleUpdateSettings)
+			pr.Put("/admin/posts/{id}", s.handleAdminUpdatePost)
 		})
 	})
 
