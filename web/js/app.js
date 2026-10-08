@@ -421,7 +421,7 @@ function embedHTML(ref) {
       <div class="post-head" style="margin-bottom:6px">${avatarHTML(ref.author, true)}
         <div class="post-meta"><div class="name">${esc(ref.author.display_name)}</div>
         <div class="handle">@${esc(ref.author.username)}</div></div></div>
-      <div class="post-body">${esc(ref.body)}</div>
+      ${renderPostBody(ref)}
     </div></div>`;
 }
 
@@ -434,13 +434,19 @@ function ownerMenu(canDelete, kind, refId) {
   return `<button class="icon-btn" data-act="${kind}" data-refid="${refId}" title="Delete" data-testid="delete-${kind}-${refId}"><span class="material-symbols-rounded">delete</span></button>`;
 }
 
+function renderPostBody(obj) {
+  if (!obj || !obj.body) return '';
+  if (obj.format === 'markdown') return `<div class="post-body md">${renderMarkdown(obj.body)}</div>`;
+  return `<div class="post-body">${esc(obj.body)}</div>`;
+}
+
 function postCard(p) {
   const a = p.author;
   const canDelete = state.user && (state.user.id === a.id || state.user.is_admin);
   let kindChip = '';
   if (p.kind === 'repost') kindChip = `<div class="kind-chip"><span class="material-symbols-rounded">repeat</span>${esc(a.display_name)} reposted</div>`;
   if (p.kind === 'quote') kindChip = `<div class="kind-chip"><span class="material-symbols-rounded">format_quote</span>Quoted</div>`;
-  const body = (p.kind !== 'repost' && p.body) ? `<div class="post-body">${esc(p.body)}</div>` : '';
+  const body = (p.kind !== 'repost') ? renderPostBody(p) : '';
   const embed = (p.kind === 'repost' || p.kind === 'quote') ? embedHTML(p.ref) : '';
   const visBadge = p.visibility === 'private' ? `<span class="badge-admin" style="background:var(--md-error-container);color:var(--md-on-surface);margin-left:8px;">Private</span>` : '';
   return `<div class="card interactive" data-testid="post-card-${p.id}">
@@ -486,6 +492,10 @@ async function viewHome() {
           <textarea id="home-composer" rows="2" placeholder="Share something with the community…" data-testid="home-composer"></textarea></div>
         <div class="composer-foot">
           <span class="count" id="home-count">0 / 5000</span>
+          <select id="home-format" data-testid="post-format" title="Text format">
+            <option value="plain" selected>Plain text</option>
+            <option value="markdown">Markdown</option>
+          </select>
           <select id="home-visibility" data-testid="post-visibility">
             <option value="public" ${defaultVis === 'public' ? 'selected' : ''}>Public</option>
             <option value="private" ${defaultVis === 'private' ? 'selected' : ''}>Private</option>
@@ -514,7 +524,8 @@ async function viewHome() {
     v.querySelector('#home-post').addEventListener('click', async () => {
       const b = ta.value.trim(); if (!b) { toast('Write something first'); return; }
       const vis = v.querySelector('#home-visibility').value;
-      try { await API.createPost(b, vis); toast('Posted'); render(); } catch (e) { toast(e.message); }
+      const fmt = v.querySelector('#home-format').value;
+      try { await API.createPost(b, vis, fmt); toast('Posted'); render(); } catch (e) { toast(e.message); }
     });
   }
 
@@ -1040,11 +1051,14 @@ function openCompose() {
   dialog({
     title: 'New post', confirmText: 'Post',
     bodyHTML: `<div class="field"><textarea id="cmp" rows="5" placeholder="What's happening?" data-testid="compose-input"></textarea></div>
+      <div class="field"><label>Format</label><select id="cmp-format"><option value="plain">Plain text</option><option value="markdown">Markdown</option></select>
+        <div class="sub md-hint">Markdown supports **bold**, _italic_, lists, &gt; quotes, \`code\` and [links](url).</div></div>
       <div class="field"><label>Visibility</label><select id="cmp-visibility"><option value="public">Public</option><option value="private">Private</option></select></div>`,
     onConfirm: async (layer) => {
       const b = layer.querySelector('#cmp').value.trim(); if (!b) { toast('Write something first'); return; }
       const vis = layer.querySelector('#cmp-visibility').value;
-      try { await API.createPost(b, vis); closeDialog(); toast('Posted'); go('#/'); } catch (e) { toast(e.message); }
+      const fmt = layer.querySelector('#cmp-format').value;
+      try { await API.createPost(b, vis, fmt); closeDialog(); toast('Posted'); go('#/'); } catch (e) { toast(e.message); }
     },
   });
 }
@@ -1053,11 +1067,12 @@ function openQuote(tt, id) {
   dialog({
     title: 'Quote', confirmText: 'Post quote',
     bodyHTML: `<div class="field"><textarea id="qbody" rows="4" placeholder="Add your thoughts…" data-testid="quote-input"></textarea></div>
+      <div class="field"><label>Format</label><select id="q-format"><option value="plain">Plain text</option><option value="markdown">Markdown</option></select></div>
       <div class="field"><label>Visibility</label><select id="q-visibility"><option value="public">Public</option><option value="private">Private</option></select></div>`,
     onConfirm: async (layer) => {
       const b = layer.querySelector('#qbody').value.trim(); if (!b) { toast('Add a comment to quote'); return; }
-      const vis = layer.querySelector('#q-visibility').value;
-      try { await API.quote(tt, id, b, vis); closeDialog(); toast('Quoted'); go('#/'); } catch (e) { toast(e.message); }
+      const fmt = layer.querySelector('#q-format').value;
+      try { await API.quote(tt, id, b, fmt); closeDialog(); toast('Quoted'); go('#/'); } catch (e) { toast(e.message); }
     },
   });
 }

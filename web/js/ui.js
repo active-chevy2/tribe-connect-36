@@ -55,6 +55,75 @@ function sanitize(html) {
   return doc.body.innerHTML;
 }
 
+/* ---- Minimal, safe Markdown renderer (subset) ----
+   Escapes all HTML first, then applies a limited markdown subset, then runs
+   the result through sanitize() as defense-in-depth. XSS-safe by construction. */
+function mdInline(line) {
+  let t = esc(line);
+  // inline code (protect contents from other transforms)
+  const codes = [];
+  t = t.replace(/`([^`]+)`/g, (_m, c) => { codes.push(c); return '\u0000C' + (codes.length - 1) + '\u0000'; });
+  // links [text](http(s)://... or /relative)
+  t = t.replace(/\[([^\]]+)\]\(((?:https?:\/\/|\/)[^\s)]+)\)/g,
+    (_m, text, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`);
+  // bold then italic
+  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  t = t.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+  t = t.replace(/(^|[^\w*])\*([^*\n]+)\*(?!\w)/g, '$1<em>$2</em>');
+  t = t.replace(/(^|[^\w_])_([^_\n]+)_(?!\w)/g, '$1<em>$2</em>');
+  // strikethrough
+  t = t.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+  // restore code
+  t = t.replace(/\u0000C(\d+)\u0000/g, (_m, i) => `<code>${codes[i]}</code>`);
+  return t;
+}
+
+function renderMarkdown(src) {
+  if (!src) return '';
+  const lines = String(src).split(/\r?\n/);
+  let html = '', i = 0;
+  const isBlockStart = l =>
+    /^```/.test(l.trim()) || /^\s*(#{1,3})\s+/.test(l) || /^\s*[-*+]\s+/.test(l) ||
+    /^\s*\d+\.\s+/.test(l) || /^\s*>\s?/.test(l) || /^\s*(---|\*\*\*|___)\s*$/.test(l);
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^```/.test(line.trim())) {
+      const buf = []; i++;
+      while (i < lines.length && !/^```/.test(lines[i].trim())) { buf.push(lines[i]); i++; }
+      i++;
+      html += `<pre class="md-pre"><code>${esc(buf.join('\n'))}</code></pre>`;
+      continue;
+    }
+    if (/^\s*(---|\*\*\*|___)\s*$/.test(line)) { html += '<hr/>'; i++; continue; }
+    const hm = line.match(/^\s*(#{1,3})\s+(.*)$/);
+    if (hm) { const lvl = Math.min(hm[1].length + 3, 6); html += `<h${lvl}>${mdInline(hm[2])}</h${lvl}>`; i++; continue; }
+    if (/^\s*>\s?/.test(line)) {
+      const buf = [];
+      while (i < lines.length && /^\s*>\s?/.test(lines[i])) { buf.push(lines[i].replace(/^\s*>\s?/, '')); i++; }
+      html += `<blockquote>${buf.map(mdInline).join('<br>')}</blockquote>`;
+      continue;
+    }
+    if (/^\s*[-*+]\s+/.test(line)) {
+      const buf = [];
+      while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) { buf.push(lines[i].replace(/^\s*[-*+]\s+/, '')); i++; }
+      html += '<ul>' + buf.map(x => `<li>${mdInline(x)}</li>`).join('') + '</ul>';
+      continue;
+    }
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const buf = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { buf.push(lines[i].replace(/^\s*\d+\.\s+/, '')); i++; }
+      html += '<ol>' + buf.map(x => `<li>${mdInline(x)}</li>`).join('') + '</ol>';
+      continue;
+    }
+    if (line.trim() === '') { i++; continue; }
+    const buf = [];
+    while (i < lines.length && lines[i].trim() !== '' && !isBlockStart(lines[i])) { buf.push(lines[i]); i++; }
+    html += `<p>${buf.map(mdInline).join('<br>')}</p>`;
+  }
+  return sanitize(html);
+}
+
+
 function avatarHTML(user, sm) {
   const cls = 'avatar' + (sm ? ' sm' : '');
   if (user && user.avatar_url) return `<div class="${cls}"><img src="${esc(user.avatar_url)}" alt=""/></div>`;

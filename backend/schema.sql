@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS posts (
   user_id BIGINT NOT NULL,
   kind ENUM('post','repost','quote') NOT NULL DEFAULT 'post',
   body MEDIUMTEXT,
+  format ENUM('plain','markdown') NOT NULL DEFAULT 'plain',
   ref_type ENUM('post','feed_item') NULL,
   ref_id BIGINT NULL,
   visibility ENUM('public','private') NOT NULL DEFAULT 'public',
@@ -68,6 +69,9 @@ CREATE TABLE IF NOT EXISTS posts (
   INDEX idx_posts_user_visibility (user_id, visibility, created_at),
   CONSTRAINT fk_post_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Idempotent migration for pre-existing databases (MariaDB supports IF NOT EXISTS).
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS format ENUM('plain','markdown') NOT NULL DEFAULT 'plain';
 
 CREATE TABLE IF NOT EXISTS comments (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,

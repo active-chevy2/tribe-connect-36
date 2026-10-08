@@ -59,6 +59,7 @@ func (s *Server) postJSON(postID int64, userID int64, depth int) map[string]inte
 		id, uid           int64
 		kind              string
 		body              sql.NullString
+		format            sql.NullString
 		refType           sql.NullString
 		refID             sql.NullInt64
 		visibility        string
@@ -66,10 +67,10 @@ func (s *Server) postJSON(postID int64, userID int64, depth int) map[string]inte
 		username, display sql.NullString
 		avatar            sql.NullString
 	)
-	err := s.db.QueryRow(`SELECT p.id, p.user_id, p.kind, p.body, p.ref_type, p.ref_id, p.visibility, p.created_at,
+	err := s.db.QueryRow(`SELECT p.id, p.user_id, p.kind, p.body, p.format, p.ref_type, p.ref_id, p.visibility, p.created_at,
 		u.username, u.display_name, u.avatar_url
 		FROM posts p JOIN users u ON u.id=p.user_id WHERE p.id=?`, postID).
-		Scan(&id, &uid, &kind, &body, &refType, &refID, &visibility, &createdAt, &username, &display, &avatar)
+		Scan(&id, &uid, &kind, &body, &format, &refType, &refID, &visibility, &createdAt, &username, &display, &avatar)
 	if err != nil {
 		return nil
 	}
@@ -94,6 +95,7 @@ func (s *Server) postJSON(postID int64, userID int64, depth int) map[string]inte
 		"type":       "post",
 		"kind":       kind,
 		"body":       body.String,
+		"format":     fmtOrPlain(format),
 		"visibility": visibility,
 		"author": map[string]interface{}{
 			"id":           uid,
@@ -108,9 +110,24 @@ func (s *Server) postJSON(postID int64, userID int64, depth int) map[string]inte
 	}
 }
 
+func fmtOrPlain(v sql.NullString) string {
+	if v.Valid && v.String == "markdown" {
+		return "markdown"
+	}
+	return "plain"
+}
+
+func normalizeFormat(f string) string {
+	if f == "markdown" {
+		return "markdown"
+	}
+	return "plain"
+}
+
 type createPostReq struct {
 	Body       string `json:"body"`
 	Visibility string `json:"visibility"`
+	Format     string `json:"format"`
 }
 
 func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
@@ -137,7 +154,7 @@ func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
 		}
 		vis = def
 	}
-	res, err := s.db.Exec("INSERT INTO posts (user_id, kind, body, visibility) VALUES (?, 'post', ?, ?)", uid, req.Body, vis)
+	res, err := s.db.Exec("INSERT INTO posts (user_id, kind, body, format, visibility) VALUES (?, 'post', ?, ?, ?)", uid, req.Body, normalizeFormat(req.Format), vis)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create post")
 		return
@@ -150,6 +167,7 @@ type refReq struct {
 	RefType string `json:"ref_type"`
 	RefID   int64  `json:"ref_id"`
 	Body    string `json:"body"`
+	Format  string `json:"format"`
 }
 
 func (s *Server) refExists(refType string, refID int64) bool {
@@ -215,7 +233,7 @@ func (s *Server) handleQuote(w http.ResponseWriter, r *http.Request) {
 			vis = "private"
 		}
 	}
-	res, err := s.db.Exec("INSERT INTO posts (user_id, kind, body, ref_type, ref_id, visibility) VALUES (?, 'quote', ?, ?, ?, ?)", uid, req.Body, req.RefType, req.RefID, vis)
+	res, err := s.db.Exec("INSERT INTO posts (user_id, kind, body, format, ref_type, ref_id, visibility) VALUES (?, 'quote', ?, ?, ?, ?, ?)", uid, req.Body, normalizeFormat(req.Format), req.RefType, req.RefID, vis)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not quote")
 		return
@@ -270,7 +288,7 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 		where = append(where, "(user_id IN (SELECT following_id FROM follows WHERE follower_id=?) OR user_id=?)")
 		args = append(args, uid, uid)
 	}
-	
+
 	visCondition := ""
 	if uid != 0 {
 		u := currentUser(r)
@@ -283,7 +301,7 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 	} else {
 		visCondition = "(visibility='public')"
 	}
-	
+
 	if visCondition != "" {
 		where = append(where, visCondition)
 	}

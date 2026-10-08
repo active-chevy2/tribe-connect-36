@@ -60,11 +60,11 @@ const API = {
 
   // social
   timeline(filter, page) { return this.get('/timeline?filter=' + filter + '&page=' + page); },
-  createPost(body, visibility) { return this.post('/posts', { body, visibility }); },
+  createPost(body, visibility, format) { return this.post('/posts', { body, visibility, format }); },
   post_(id) { return this.get('/posts/' + id); },
   deletePost(id) { return this.del('/posts/' + id); },
   repost(t, id) { return this.post('/repost', { ref_type: t, ref_id: id }); },
-  quote(t, id, body) { return this.post('/quote', { ref_type: t, ref_id: id, body }); },
+  quote(t, id, body, format) { return this.post('/quote', { ref_type: t, ref_id: id, body, format }); },
   comments(t, id) { return this.get('/comments?target_type=' + t + '&target_id=' + id); },
   addComment(d) { return this.post('/comments', d); },
   deleteComment(id) { return this.del('/comments/' + id); },
