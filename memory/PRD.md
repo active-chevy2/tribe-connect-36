@@ -55,6 +55,12 @@ Minimise bugs/errors, maximise deployability, **Coolify PaaS-compatible**.
 - Added **"About this instance"** page (`#/about`, public) + nav entry. ✅
 - Added admin-editable **instance description** (`app_description` setting) that
   feeds the About page and PWA `manifest.json` description. ✅
+- **Full UI rebranding**: rail logo, all auth screens, About page and the browser
+  tab title now read `app_name` + `app_icon_url` (served via public manifest.json,
+  loaded at boot + refreshed after an admin save). No icon → clean letter logo. ✅
+- Fixed **service-worker** stale-cache bug (was cache-first with a fixed cache
+  name → froze JS/CSS/manifest). Now network-first + versioned cache so updates
+  and branding changes always apply online, with offline fallback. ✅
 
 ## Preview wiring (not part of the deliverable)
 - IMPORTANT: this is a Go+MariaDB app. `frontend` supervisor program's

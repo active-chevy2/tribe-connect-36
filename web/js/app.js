@@ -1,5 +1,5 @@
 /* Conflux — SPA controller (vanilla JS, hash routing). */
-const state = { user: null, authMode: 'login', needsAdmin: false, theme: localStorage.getItem('fs_theme') || '' };
+const state = { user: null, authMode: 'login', needsAdmin: false, theme: localStorage.getItem('fs_theme') || '', brand: null };
 
 if (state.theme) document.documentElement.setAttribute('data-theme', state.theme);
 
@@ -35,6 +35,7 @@ function restoreScroll(key) {
 
 /* ---------------- boot ---------------- */
 async function boot() {
+  await loadBrand();
   if (API.token) {
     try { state.user = await API.me(); } catch (_) { API.setToken(null); }
   }
@@ -135,6 +136,39 @@ function navHTML(active, cls, itemCls) {
   }).join('');
 }
 
+/* ---------------- branding (admin-configurable) ---------------- */
+async function loadBrand() {
+  try {
+    const m = await fetch('/manifest.json', { cache: 'no-store' }).then(r => r.json());
+    let icon = (m.icons && m.icons[0] && m.icons[0].src) || '';
+    if (icon === '/logo192.png') icon = ''; // placeholder default -> use letter logo
+    state.brand = {
+      name: m.name || 'Conflux',
+      short_name: m.short_name || m.name || 'Conflux',
+      icon: icon,
+      theme: m.theme_color || '',
+    };
+  } catch (_) {
+    state.brand = { name: 'Conflux', short_name: 'Conflux', icon: '', theme: '' };
+  }
+  document.title = state.brand.name;
+}
+function brandName() { return (state.brand && state.brand.name) || 'Conflux'; }
+function brandMark() {
+  const b = state.brand || {};
+  const initial = esc((b.name || 'C').slice(0, 1).toUpperCase());
+  if (b.icon) {
+    return `<img class="brand-img" src="${esc(b.icon)}" alt="logo" data-letter="${initial}" onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:this.dataset.letter}))" />`;
+  }
+  return `<span>${initial}</span>`;
+}
+function authBrandHTML(fontSize) {
+  const b = state.brand || {};
+  const icon = b.icon ? `<img class="auth-logo" src="${esc(b.icon)}" alt="logo" onerror="this.style.display='none'" />` : '';
+  const style = fontSize ? ` style="font-size:${fontSize}"` : '';
+  return `${icon}<div class="auth-brand"${style}>${esc(brandName())}</div>`;
+}
+
 function shell(active, topbarHTML, opts) {
   opts = opts || {};
   const app = document.getElementById('app');
@@ -161,7 +195,7 @@ function shell(active, topbarHTML, opts) {
   app.innerHTML = `
     <div class="shell">
       <nav class="rail" data-testid="rail-nav">
-        <div class="brand" title="Conflux">C</div>
+        <div class="brand" title="${esc(brandName())}" data-testid="brand-logo">${brandMark()}</div>
         ${navHTML(active, 'rail', 'rail-item')}
         <div class="spacer"></div>
         ${userActions}
@@ -196,6 +230,7 @@ async function viewAbout() {
     name = m.name || name;
     description = m.description || '';
     iconURL = (m.icons && m.icons[0] && m.icons[0].src) || '';
+    if (iconURL === '/logo192.png') iconURL = '';
   } catch (_) {}
   try { const b = await API.bootstrap(); userCount = b.user_count || 0; } catch (_) {}
   const initial = esc((name || 'C').slice(0, 1).toUpperCase());
@@ -236,7 +271,7 @@ async function renderAuth(inviteToken) {
   app.innerHTML = `
     <div class="auth-wrap">
       <div class="auth-card">
-        <div class="auth-brand">Conflux</div>
+        ${authBrandHTML()}
         <div class="auth-tag">Read the feeds. Join the conversation.</div>
         ${state.needsAdmin ? `<div class="auth-note" data-testid="admin-note"><span class="material-symbols-rounded">bolt</span>You're the first here — this account becomes the <b>&nbsp;admin</b>.</div>` : ''}
         <div class="form-error" id="auth-err" style="display:none"></div>
@@ -302,7 +337,7 @@ function renderForgotPassword() {
   app.innerHTML = `
     <div class="auth-wrap">
       <div class="auth-card">
-        <div class="auth-brand">Conflux</div>
+        ${authBrandHTML()}
         <div class="auth-tag">Reset your password</div>
         <div class="form-error" id="reset-err" style="display:none"></div>
         <form id="forgot-form">
@@ -330,7 +365,7 @@ function renderResetPassword(token) {
   app.innerHTML = `
     <div class="auth-wrap">
       <div class="auth-card">
-        <div class="auth-brand">Conflux</div>
+        ${authBrandHTML()}
         <div class="auth-tag">Set new password</div>
         <div class="form-error" id="reset-err" style="display:none"></div>
         <form id="reset-form">
@@ -776,6 +811,7 @@ async function viewAdminSettings() {
     });
     try {
       await API.updateSettings(data);
+      await loadBrand();
       toast('Settings updated');
       render();
     } catch (e) { toast(e.message); }
@@ -839,7 +875,7 @@ async function viewPublicPost(id) {
   app.innerHTML = `
     <div class="auth-wrap" style="background:var(--md-background);padding:20px">
       <div class="auth-card" style="max-width:600px">
-        <div class="auth-brand" style="font-size:28px">Conflux</div>
+        ${authBrandHTML('28px')}
         <div style="margin-top:20px">
           ${postCard(post)}
         </div>
