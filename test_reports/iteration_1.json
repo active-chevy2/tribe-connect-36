@@ -26,6 +26,6 @@
   "seed_data_creation": "Each pytest run creates one TEST_ user (test_<uuid8>@example.com / password123) plus one TEST_post, comments, repost, quote, share and follow relationships. No cleanup — data is stable and harmless.",
   "retest_needed": false,
   "main_agent_can_self_test": true,
-  "context_for_next_testing_agent": "Backend base URL is https://feed-share-110.preview.emergentagent.com; API prefix /api. Feed add payload uses field name 'feed_url' (not 'url'). Reliable feed for testing: https://hnrss.org/frontpage (NASA feed is rate-limited 429). Reactions require target_type in {post, feed_item, comment}, reaction in {like,love,celebrate,insightful,laugh}. Existing pytest suite lives at /app/backend/tests/backend_test.py and can be run with: pytest /app/backend/tests/backend_test.py -v.",
+  "context_for_next_testing_agent": "Backend base URL is https://tribe-connect-36.preview.emergentagent.com; API prefix /api. Feed add payload uses field name 'feed_url' (not 'url'). Reliable feed for testing: https://hnrss.org/frontpage (NASA feed is rate-limited 429). Reactions require target_type in {post, feed_item, comment}, reaction in {like,love,celebrate,insightful,laugh}. Existing pytest suite lives at /app/backend/tests/backend_test.py and can be run with: pytest /app/backend/tests/backend_test.py -v.",
   "rca of the issue": "N/A — no bugs reproduced. Only a test-side fix was needed: initial feed POST used {url:...} but the Go API expects {feed_url:...} per feeds.go handleAddFeed. Corrected in the test file."
 }
