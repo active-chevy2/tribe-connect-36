@@ -405,3 +405,18 @@ img, video, iframe { display: block; max-width: 100%; height: auto; }
   width: 64px; height: 64px; border-radius: var(--r-lg);
   object-fit: cover; display: block; margin: 0 auto 10px;
 }
+
+/* ---- Admin theme color picker ---- */
+.theme-picker { display: flex; gap: 10px; align-items: center; }
+.theme-picker input[type="color"] {
+  width: 48px; height: 44px; padding: 3px; cursor: pointer;
+  border: 1px solid var(--md-outline-variant); border-radius: var(--r-md);
+  background: var(--md-surface);
+}
+.theme-presets { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 12px; }
+.theme-swatch {
+  width: 30px; height: 30px; padding: 0; cursor: pointer;
+  border-radius: var(--r-full); border: 2px solid var(--md-outline-variant);
+  transition: transform .12s ease;
+}
+.theme-swatch:hover { transform: scale(1.1); }

@@ -152,6 +152,7 @@ async function loadBrand() {
     state.brand = { name: 'Conflux', short_name: 'Conflux', icon: '', theme: '' };
   }
   document.title = state.brand.name;
+  applyThemeColor(state.brand.theme);
 }
 function brandName() { return (state.brand && state.brand.name) || 'Conflux'; }
 function brandMark() {
@@ -796,7 +797,16 @@ async function viewAdminSettings() {
       <div class="field"><label>App name</label><input id="app_name" value="${esc(settings.app_name || 'Conflux')}" /></div>
       <div class="field"><label>Short name</label><input id="app_short_name" value="${esc(settings.app_short_name || 'Conflux')}" /></div>
       <div class="field"><label>Description (shown on the About page)</label><textarea id="app_description" rows="3">${esc(settings.app_description || '')}</textarea></div>
-      <div class="field"><label>Theme color (hex)</label><input id="app_theme_color" value="${esc(settings.app_theme_color || '#006a6a')}" /></div>
+      <div class="field"><label>Theme / accent color</label>
+        <div class="theme-picker">
+          <input type="color" id="app_theme_color_picker" value="${esc(settings.app_theme_color || '#006a6a')}" />
+          <input id="app_theme_color" value="${esc(settings.app_theme_color || '#006a6a')}" placeholder="#006a6a" />
+        </div>
+        <div class="theme-presets">
+          ${THEME_PRESETS.map(p => `<button type="button" class="theme-swatch" data-act="set-theme-color" data-color="${p.hex}" title="${esc(p.name)}" style="background:${p.hex}"></button>`).join('')}
+        </div>
+        <div class="sub" style="margin-top:6px">Pick a swatch or enter a hex — it previews live. Click <b>Save settings</b> to apply for everyone.</div>
+      </div>
       <div class="field"><label>Icon URL (192x192)</label><input id="app_icon_url" value="${esc(settings.app_icon_url || '')}" /></div>
       <button type="submit" class="btn btn-filled">Save settings</button>
     </form>
@@ -816,6 +826,24 @@ async function viewAdminSettings() {
       render();
     } catch (e) { toast(e.message); }
   });
+
+  // Live theme-color preview (text <-> color input sync)
+  const tText = document.getElementById('app_theme_color');
+  const tPick = document.getElementById('app_theme_color_picker');
+  if (tText && tPick) {
+    tText.addEventListener('input', () => {
+      let v = tText.value.trim();
+      if (/^#?[0-9a-fA-F]{6}$/.test(v)) {
+        if (!v.startsWith('#')) v = '#' + v;
+        tPick.value = v;
+        applyThemeColor(v);
+      }
+    });
+    tPick.addEventListener('input', () => {
+      tText.value = tPick.value;
+      applyThemeColor(tPick.value);
+    });
+  }
 }
 
 async function viewAdminInvites() {
@@ -908,6 +936,15 @@ async function onGlobalAction(e) {
   if (act === 'back') { history.length > 1 ? history.back() : go('#/'); return; }
   if (act === 'logout') { API.setToken(null); state.user = null; go('#/'); toast('Logged out'); return; }
   if (act === 'toggle-theme') { toggleTheme(); return; }
+  if (act === 'set-theme-color') {
+    const hex = el.dataset.color;
+    const t = document.getElementById('app_theme_color');
+    const p = document.getElementById('app_theme_color_picker');
+    if (t) t.value = hex;
+    if (p) p.value = hex;
+    applyThemeColor(hex);
+    return;
+  }
   if (act === 'switch-auth') { state.authMode = state.authMode === 'login' ? 'register' : 'login'; renderAuth(); return; }
   if (act === 'compose') { openCompose(); return; }
   if (act === 'manage-feeds') { openFeeds(); return; }
@@ -1074,6 +1111,77 @@ async function refreshFeedsDialog() {
     </div>`).join('');
 }
 
+/* ---------------- theme color engine (admin-configurable accent) ---------------- */
+const DEFAULT_THEME_HEX = '#006a6a';
+const THEME_VARS = ['--md-primary', '--md-on-primary', '--md-primary-container', '--md-on-primary-container', '--md-secondary', '--md-secondary-container', '--md-on-secondary-container'];
+const THEME_PRESETS = [
+  { name: 'Teal (default)', hex: '#006a6a' },
+  { name: 'Blue', hex: '#0b57d0' },
+  { name: 'Indigo', hex: '#4f46e5' },
+  { name: 'Violet', hex: '#7c3aed' },
+  { name: 'Magenta', hex: '#a21caf' },
+  { name: 'Pink', hex: '#be185d' },
+  { name: 'Red', hex: '#c62828' },
+  { name: 'Orange', hex: '#e65100' },
+  { name: 'Green', hex: '#2e7d32' },
+  { name: 'Slate', hex: '#475569' },
+];
+
+function hexToHsl(hex) {
+  if (!hex) return null;
+  let h = String(hex).trim().replace(/^#/, '');
+  if (h.length === 3) h = h.split('').map(c => c + c).join('');
+  if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
+  const r = parseInt(h.slice(0, 2), 16) / 255, g = parseInt(h.slice(2, 4), 16) / 255, b = parseInt(h.slice(4, 6), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let hue = 0, sat = 0; const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    sat = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) hue = (g - b) / d + (g < b ? 6 : 0);
+    else if (max === g) hue = (b - r) / d + 2;
+    else hue = (r - g) / d + 4;
+    hue *= 60;
+  }
+  return { h: Math.round(hue), s: Math.round(sat * 100), l: Math.round(l * 100) };
+}
+
+function effectiveDark() {
+  const t = document.documentElement.getAttribute('data-theme');
+  if (t === 'dark') return true;
+  if (t === 'light') return false;
+  return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+}
+
+// Generate a cohesive MD3-like accent palette from a single seed hex and
+// apply it to the primary + secondary token families (light & dark aware).
+function applyThemeColor(hex) {
+  const root = document.documentElement;
+  const clear = () => THEME_VARS.forEach(v => root.style.removeProperty(v));
+  const hsl = hexToHsl(hex);
+  if (!hsl || String(hex).trim().toLowerCase() === DEFAULT_THEME_HEX) { clear(); return; }
+  const h = hsl.h;
+  const s = Math.max(30, Math.min(hsl.s, 92));
+  const C = (sat, light) => `hsl(${h}, ${sat}%, ${light}%)`;
+  if (effectiveDark()) {
+    root.style.setProperty('--md-primary', C(Math.min(s, 78), 80));
+    root.style.setProperty('--md-on-primary', C(s, 18));
+    root.style.setProperty('--md-primary-container', C(Math.min(s, 70), 30));
+    root.style.setProperty('--md-on-primary-container', C(Math.min(s, 85), 88));
+    root.style.setProperty('--md-secondary', C(24, 78));
+    root.style.setProperty('--md-secondary-container', C(22, 30));
+    root.style.setProperty('--md-on-secondary-container', C(26, 86));
+  } else {
+    root.style.setProperty('--md-primary', C(s, 36));
+    root.style.setProperty('--md-on-primary', '#ffffff');
+    root.style.setProperty('--md-primary-container', C(Math.min(s, 85), 88));
+    root.style.setProperty('--md-on-primary-container', C(s, 14));
+    root.style.setProperty('--md-secondary', C(30, 38));
+    root.style.setProperty('--md-secondary-container', C(30, 88));
+    root.style.setProperty('--md-on-secondary-container', C(38, 16));
+  }
+}
+
 /* ---------------- theme ---------------- */
 function toggleTheme() {
   const cur = document.documentElement.getAttribute('data-theme');
@@ -1082,6 +1190,7 @@ function toggleTheme() {
   document.documentElement.setAttribute('data-theme', next);
   localStorage.setItem('fs_theme', next);
   state.theme = next;
+  applyThemeColor(state.brand && state.brand.theme);
 }
 
 /* ---------------- helpers ---------------- */

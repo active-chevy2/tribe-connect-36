@@ -61,6 +61,12 @@ Minimise bugs/errors, maximise deployability, **Coolify PaaS-compatible**.
 - Fixed **service-worker** stale-cache bug (was cache-first with a fixed cache
   name → froze JS/CSS/manifest). Now network-first + versioned cache so updates
   and branding changes always apply online, with offline fallback. ✅
+- **Theme/accent color now actually recolors the UI** (previously only set the PWA
+  manifest color). Seed hex → generated MD3-like palette for the primary AND
+  secondary/container token families, light & dark aware. Admin picker has a
+  color input + hex field + 10 preset swatches + live preview; applied at boot,
+  on light/dark toggle, and after save. Default `#006a6a` keeps the hand-tuned
+  palette. (web/js/app.js applyThemeColor/hexToHsl.) ✅
 
 ## Preview wiring (not part of the deliverable)
 - IMPORTANT: this is a Go+MariaDB app. `frontend` supervisor program's
