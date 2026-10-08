@@ -358,3 +358,39 @@ img, video, iframe { display: block; max-width: 100%; height: auto; }
   .fab { bottom: 88px; right: 16px; }
   .comment.child { margin-left: 20px; }
 }
+
+/* ---- About this instance ---- */
+.about-card {
+  max-width: 640px;
+  margin: 0 auto;
+  background: var(--md-surface-container-low);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--r-xl);
+  padding: 28px;
+}
+.about-head { display: flex; align-items: center; gap: 16px; }
+.about-icon, .about-icon-fallback {
+  width: 72px; height: 72px; border-radius: var(--r-lg); object-fit: cover; flex: none;
+}
+.about-icon-fallback {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--md-primary-container); color: var(--md-on-primary-container);
+  font-family: var(--font-display); font-size: 36px; font-weight: 600;
+}
+.about-name { margin: 0; font-family: var(--font-display); }
+.about-desc {
+  margin: 20px 0; font-size: 1.05rem; line-height: 1.6; color: var(--md-on-surface);
+  white-space: pre-wrap;
+}
+.about-features { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 24px; }
+.about-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px; border-radius: var(--r-full);
+  background: var(--md-surface-container-high); color: var(--md-on-surface-variant);
+  font-size: .9rem;
+}
+.about-chip .material-symbols-rounded { font-size: 18px; color: var(--md-primary); }
+.about-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap; padding-top: 16px; border-top: 1px solid var(--md-outline-variant);
+}

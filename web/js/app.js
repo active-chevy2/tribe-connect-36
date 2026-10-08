@@ -76,7 +76,7 @@ async function render() {
   const [seg, arg, arg2] = parts;
 
   // Define routes that can be accessed without logging in
-  const publicRoutes = ['', 'explore', 'people', 'profile', 'post', 'feed_item', 'p', 'login', 'register', 'forgot-password', 'reset-password'];
+  const publicRoutes = ['', 'explore', 'people', 'profile', 'post', 'feed_item', 'p', 'about', 'login', 'register', 'forgot-password', 'reset-password'];
 
   if (!state.user && !publicRoutes.includes(seg)) {
     renderAuth(); return;
@@ -108,6 +108,7 @@ async function render() {
     if (!seg || seg === '') return viewHome();
     if (seg === 'explore') return viewExplore();
     if (seg === 'people') return viewPeople();
+    if (seg === 'about') return viewAbout();
     if (seg === 'profile') return viewProfile(arg || (state.user ? state.user.username : ''));
     if (seg === 'post') return viewDetail('post', arg);
     if (seg === 'feed_item') return viewDetail('feed_item', arg);
@@ -120,6 +121,7 @@ const NAV = [
   { key: 'home', icon: 'home', label: 'Home', href: '#/' },
   { key: 'explore', icon: 'rss_feed', label: 'Explore', href: '#/explore' },
   { key: 'people', icon: 'groups', label: 'People', href: '#/people' },
+  { key: 'about', icon: 'info', label: 'About', href: '#/about' },
   { key: 'profile', icon: 'person', label: 'Profile', href: '#/profile/' },
 ];
 
@@ -183,6 +185,46 @@ function emptyHTML(msg, icon) {
   return `<div class="empty"><span class="material-symbols-rounded">${icon || 'inbox'}</span><div>${esc(msg)}</div></div>`;
 }
 function spinnerHTML() { return '<div class="spinner"></div>'; }
+
+/* ---------------- about this instance ---------------- */
+async function viewAbout() {
+  const v = shell('about', `<div><h1>About</h1><div class="sub">About this instance</div></div>`);
+  v.innerHTML = spinnerHTML();
+  let name = 'Conflux', description = '', iconURL = '', userCount = 0;
+  try {
+    const m = await fetch('/manifest.json').then(r => r.json());
+    name = m.name || name;
+    description = m.description || '';
+    iconURL = (m.icons && m.icons[0] && m.icons[0].src) || '';
+  } catch (_) {}
+  try { const b = await API.bootstrap(); userCount = b.user_count || 0; } catch (_) {}
+  const initial = esc((name || 'C').slice(0, 1).toUpperCase());
+  v.innerHTML = `
+    <div class="about-card">
+      <div class="about-head">
+        ${iconURL
+          ? `<img class="about-icon" src="${esc(iconURL)}" alt="icon" onerror="this.outerHTML='<div class=\\'about-icon-fallback\\'>${initial}</div>'"/>`
+          : `<div class="about-icon-fallback">${initial}</div>`}
+        <div>
+          <h2 class="about-name">${esc(name)}</h2>
+          <div class="sub">${userCount} member${userCount === 1 ? '' : 's'}</div>
+        </div>
+      </div>
+      <p class="about-desc">${esc(description || 'A minimalist, self-hosted social micro-blog and feed reader.')}</p>
+      <div class="about-features">
+        <div class="about-chip"><span class="material-symbols-rounded">favorite</span> Heart &amp; react</div>
+        <div class="about-chip"><span class="material-symbols-rounded">repeat</span> Repost &amp; quote</div>
+        <div class="about-chip"><span class="material-symbols-rounded">forum</span> Threaded comments</div>
+        <div class="about-chip"><span class="material-symbols-rounded">rss_feed</span> RSS / Atom feeds</div>
+        <div class="about-chip"><span class="material-symbols-rounded">group</span> Invite-based community</div>
+      </div>
+      <div class="about-foot">
+        <span class="sub">Powered by Conflux · self-hosted &amp; open</span>
+        ${state.user ? '' : `<a href="#/login" class="btn btn-filled btn-sm">Join this community</a>`}
+      </div>
+    </div>`;
+}
+
 
 /* ---------------- auth ---------------- */
 async function renderAuth(inviteToken) {
@@ -718,6 +760,7 @@ async function viewAdminSettings() {
       <h3>PWA / App Branding</h3>
       <div class="field"><label>App name</label><input id="app_name" value="${esc(settings.app_name || 'Conflux')}" /></div>
       <div class="field"><label>Short name</label><input id="app_short_name" value="${esc(settings.app_short_name || 'Conflux')}" /></div>
+      <div class="field"><label>Description (shown on the About page)</label><textarea id="app_description" rows="3">${esc(settings.app_description || '')}</textarea></div>
       <div class="field"><label>Theme color (hex)</label><input id="app_theme_color" value="${esc(settings.app_theme_color || '#006a6a')}" /></div>
       <div class="field"><label>Icon URL (192x192)</label><input id="app_icon_url" value="${esc(settings.app_icon_url || '')}" /></div>
       <button type="submit" class="btn btn-filled">Save settings</button>
@@ -728,7 +771,7 @@ async function viewAdminSettings() {
     e.preventDefault();
     const form = e.target;
     const data = {};
-    form.querySelectorAll('input, select').forEach(el => {
+    form.querySelectorAll('input, select, textarea').forEach(el => {
       if (el.id) data[el.id] = el.value;
     });
     try {

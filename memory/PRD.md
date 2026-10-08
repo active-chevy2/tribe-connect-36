@@ -47,7 +47,22 @@ Minimise bugs/errors, maximise deployability, **Coolify PaaS-compatible**.
 - Deployment: Dockerfile (multi-stage), docker-compose.yml (Coolify-safe),
   .env.example, .dockerignore, README with Coolify guidance. ✅
 
+## Implemented (2026-10, continuation)
+- Restored broken preview env after container reset: reinstalled Go 1.23 +
+  MariaDB, recreated DB/user (feeduser/feedsocial), rebuilt Go binary, added a
+  supervisor-managed `mariadb` program. Core flows re-verified (register→admin,
+  post, heart/like, comment, repost, quote, timeline, settings). ✅
+- Added **"About this instance"** page (`#/about`, public) + nav entry. ✅
+- Added admin-editable **instance description** (`app_description` setting) that
+  feeds the About page and PWA `manifest.json` description. ✅
+
 ## Preview wiring (not part of the deliverable)
+- IMPORTANT: this is a Go+MariaDB app. `frontend` supervisor program's
+  `yarn start` is repurposed (see frontend/package.json) to `exec` the Go binary
+  `/app/backend/feedsocial` on :3000. `backend` runs server.py (reverse proxy
+  :8001 → :3000). `mariadb` runs via /etc/supervisor/conf.d/mariadb.conf.
+- To rebuild after Go changes: `PATH=$PATH:/usr/local/go/bin go build -o feedsocial .`
+  then `supervisorctl restart frontend`. Static JS/CSS in /app/web need no rebuild.
 - `frontend` supervisor program runs the Go binary on :3000 (full app).
 - `backend` supervisor program runs `server.py` = reverse proxy → :3000 (so the
   ingress `/api`→8001 route reaches the Go app).

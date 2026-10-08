@@ -22,10 +22,15 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	if iconURL == "" {
 		iconURL = "/logo192.png" // default maybe
 	}
+	description, _ := s.getSetting("app_description")
+	if description == "" {
+		description = "A minimalist, self-hosted social micro-blog and feed reader."
+	}
 
 	manifest := map[string]interface{}{
 		"name":             appName,
 		"short_name":       shortName,
+		"description":      description,
 		"start_url":        "/",
 		"display":          "standalone",
 		"theme_color":      themeColor,
